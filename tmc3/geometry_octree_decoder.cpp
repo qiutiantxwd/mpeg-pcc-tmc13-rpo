@@ -1106,7 +1106,7 @@ GeometryOctreeDecoder::decodeDirectPosition(
   numPoints += numPointsGt1;
 
   int numDuplicatePoints = 0;
-  if (!geom_unique_points_flag && !numPointsGt1) {
+  if (!geom_unique_points_flag && !numPointsGt1) { //count the number of duplicated points
     numDuplicatePoints = _arithmeticDecoder->decode(_ctxDupPointCntGt0);
     if (numDuplicatePoints) {
       numDuplicatePoints += _arithmeticDecoder->decode(_ctxDupPointCntGt1);

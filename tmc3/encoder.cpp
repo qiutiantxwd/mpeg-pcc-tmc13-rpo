@@ -226,7 +226,7 @@ PCCTMC3Encoder3::compress(
   //    slice partitioning subsequent
   //  todo(df):
   PartitionSet partitions;
-  SrcMappedPointSet quantizedInput = quantization(inputPointCloud);
+  SrcMappedPointSet quantizedInput = quantization(inputPointCloud);// This is where reduction in points happen 
 
   // write out all parameter sets prior to encoding
   callback->onOutputBuffer(write(*_sps));
@@ -919,7 +919,7 @@ PCCTMC3Encoder3::quantization(const PCCPointSet3& src)
     return samplePositionsUniq(
       _inputDecimationScale, _srcToCodingScale, _originInCodingCoords, src);
 
-  if (_gps->geom_unique_points_flag)
+  if (_gps->geom_unique_points_flag) //This is when we don't keep duplicated points
     return quantizePositionsUniq(
       _srcToCodingScale, _originInCodingCoords, clampBox, src);
 
