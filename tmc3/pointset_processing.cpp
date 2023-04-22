@@ -73,8 +73,13 @@ reducePointSet(const PCCPointSet3& src, UniqueFn uniqueFn, QFn qFn)
       // If a valid index is inserted, after XOR with 0x80000000, its MSB will be set to 1.
 
       dst.srcIdxDupList[res.first->second] ^= 0x80000000;
+      // If res.first->second is already negative (when key already exists), XOR will revert the value back to positive index (MSB changes back to 0)
       dst.srcIdxDupList[i] = res.first->second | 0x80000000;
+      // dst.srcIdxDupList[i], which records the index of point that has the same position as the current point, is assigned by 
+      // res.first->second | mask. This will change MSB to 1. 
       res.first->second = i;
+      // This line updates the value in the map that contains only unique points. It records the latest index that has this particular position.
+      // This line will assign the current i to res.first->second if the current point is new unique point.
     }
 
     numDstPoints = qPosToSrcIdx.size();// Number of unique points after duplicate removal. (New cloud not generate yet)
