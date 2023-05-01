@@ -69,7 +69,7 @@ reducePointSet(const PCCPointSet3& src, UniqueFn uniqueFn, QFn qFn)
       // Index of the src point (i) or the index of the previous point with
       // the same quantised position
       // res.first->second is either the index of newly inserted point or that of the previous point with same quantized position
-      // 0x80000000 = 0b1000 0000 0000 0000 ..., this is used to convert a valid index to negative since only the MSB is 1.
+      // 0x80000000 = 0b1000 0000 0000 0000 ...(the "mask"), this is used to convert a valid index to negative since only the MSB is 1.
       // If a valid index is inserted, after XOR with 0x80000000, its MSB will be set to 1.
 
       dst.srcIdxDupList[res.first->second] ^= 0x80000000;
@@ -84,7 +84,8 @@ reducePointSet(const PCCPointSet3& src, UniqueFn uniqueFn, QFn qFn)
 
     numDstPoints = qPosToSrcIdx.size();// Number of unique points after duplicate removal. (New cloud not generate yet)
   }
-
+  // After the above block, qPosToSrcIdx saves
+  // dst.srcIdxDupList saves
   // Number of quantised points is now known
   dst.cloud.resize(numDstPoints);
   dst.idxToSrcIdx.resize(numDstPoints);
@@ -94,7 +95,7 @@ reducePointSet(const PCCPointSet3& src, UniqueFn uniqueFn, QFn qFn)
   // Generate dst outputs
   for (int i = 0, dstIdx = 0; i < numSrcPoints; ++i) {
     // Find head of each linked list
-    if (dst.srcIdxDupList[i] >= 0)
+    if (dst.srcIdxDupList[i] >= 0)//Need to make changes to here so that we can add duplicated points as well. 
       continue;
 
     dst.srcIdxDupList[i] ^= 0x80000000; // 0b100...01 after XORing with 0x80000000 is 1
@@ -109,6 +110,90 @@ reducePointSet(const PCCPointSet3& src, UniqueFn uniqueFn, QFn qFn)
 
   return dst;
 }
+
+// ==============================Tian: Start of custom template function: Selective retention of duplicated points===========================//
+template<typename UniqueFn, typename QFn>
+SrcMappedPointSet
+reducePointSetCustom(const PCCPointSet3& src, UniqueFn uniqueFn, QFn qFn)
+{
+  SrcMappedPointSet dst;
+  int numSrcPoints = src.getPointCount();
+
+  // Build a map of duplicate points
+  int numDstPoints = 0;
+  if (1) {
+    std::map<Vec3<int32_t>, int> qPosToSrcIdx;
+    dst.srcIdxDupList.resize(numSrcPoints);
+    for (int i = numSrcPoints - 1; i >= 0; i--) {// Starting from the last point in the src 
+      // Attempt to insert quantised position
+      auto res = qPosToSrcIdx.insert({uniqueFn(src[i]), i});//res->second will be false is key already exists
+
+      // Append to linked list of same positions.
+      // Index of the src point (i) or the index of the previous point with
+      // the same quantised position
+      // res.first->second is either the index of newly inserted point or that of the previous point with same quantized position
+      // 0x80000000 = 0b1000 0000 0000 0000 ...(the "mask"), this is used to convert a valid index to negative since only the MSB is 1.
+      // If a valid index is inserted, after XOR with 0x80000000, its MSB will be set to 1.
+
+      dst.srcIdxDupList[res.first->second] ^= 0x80000000;
+      // If res.first->second is already negative (when key already exists), XOR will revert the value back to positive index (MSB changes back to 0)
+      dst.srcIdxDupList[i] = res.first->second | 0x80000000;
+      // dst.srcIdxDupList[i], which records the index of point that has the same position as the current point, is assigned by 
+      // res.first->second | mask. This will change MSB to 1. 
+      res.first->second = i;
+      // This line updates the value in the map that contains only unique points. It records the latest index that has this particular position.
+      // This line will assign the current i to res.first->second if the current point is new unique point.
+    }
+
+    numDstPoints = qPosToSrcIdx.size();// Number of unique points after duplicate removal. (New cloud not generate yet)
+  }
+  // After the above block, qPosToSrcIdx saves
+  // dst.srcIdxDupList saves
+  // Number of quantised points is now known
+  dst.cloud.resize(numDstPoints);
+  dst.idxToSrcIdx.resize(numDstPoints);
+  if (src.hasLaserAngles())
+    dst.cloud.addLaserAngles();
+
+  // Generate dst outputs
+  for (int i = 0, dstIdx = 0; i < numSrcPoints; ++i) {
+    // Find head of each linked list
+    if (dst.srcIdxDupList[i] >= 0)//Need to make changes to here so that we can add duplicated points as well. 
+      continue;
+
+    dst.srcIdxDupList[i] ^= 0x80000000; // 0b100...01 after XORing with 0x80000000 is 1
+    dst.idxToSrcIdx[dstIdx] = i;
+    if (src.hasLaserAngles() == true)
+      dst.cloud.setLaserAngle(dstIdx, src.getLaserAngle(i));
+    dst.cloud[dstIdx++] = qFn(src[i]);
+  }
+
+  // Add attribute storage to match src
+  dst.cloud.addRemoveAttributes(src.hasColors(), src.hasReflectances());
+
+  return dst;
+}
+// ==============================Tian: End of custom template function: Selective retention of duplicated points
+
+//===============================Tian: Start of custom function: Selective retention of duplicated points
+SrcMappedPointSet
+quantizePositionsCustom(
+  const float scaleFactor,
+  const Vec3<int> offset,
+  const Box3<int> clamp,
+  const PCCPointSet3& src)
+{
+  auto qFn = [=](Vec3<int> point) {
+    for (int k = 0; k < 3; k++) {
+      double posk = std::round(point[k] * scaleFactor) - offset[k];
+      point[k] = PCCClip(int32_t(posk), clamp.min[k], clamp.max[k]);
+    }
+    return point;
+  };
+
+  return reducePointSetCustom(src, qFn, qFn);
+}
+//===============================Tian: End of custom function: Selective retention of duplicated points
 
 //============================================================================
 // Subsample a point cloud, retaining unique points only.

@@ -105,6 +105,14 @@ SrcMappedPointSet quantizePositionsUniq(
   const Box3<int> clamp,
   const PCCPointSet3& src);
 
+//================================Tian: Custom function declaration to customly retain duplicated points
+SrcMappedPointSet quantizePositionsCustom(
+  const float scaleFactor,
+  const Vec3<int> offset,
+  const Box3<int> clamp,
+  const PCCPointSet3& src);
+
+
 //============================================================================
 // Quantise the geometry of a point cloud, retaining duplicate points.
 // Points in the @src point cloud are translated by -@offset, then quantised

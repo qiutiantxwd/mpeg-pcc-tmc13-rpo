@@ -442,6 +442,12 @@ struct GeometryParameterSet {
   // attributes) at the same spatial position.
   bool geom_unique_points_flag;
 
+  //===================================Tian: Custom flag and values
+  // Controls the ability to retain duplicated points in a custom manner
+  bool custom_duplicate_retention_flag;
+
+  // The probability to retain a duplicated point;
+  // double duplicate_retention_probability; 
   // Defines the size of the neighbour availiability volume (aka
   // look-ahead cube size) for occupancy searches.  A value of 0
   // indicates that only neighbours that are direct siblings are available.

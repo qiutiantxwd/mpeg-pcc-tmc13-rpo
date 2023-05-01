@@ -722,6 +722,11 @@ ParseParameters(int argc, char* argv[], Parameters& params)
   ("mergeDuplicatedPoints",
     params.encoder.gps.geom_unique_points_flag, true,
     "Enables removal of duplicated points")
+    
+// Custom parameter
+  ("custom_duplicate_retention_flag",
+  params.encoder.gps.custom_duplicate_retention_flag, false,
+  "Enables custom retention of duplicated points")
 
   ("partitionMethod",
     params.encoder.partition.method, PartitionMethod::kUniformSquare,

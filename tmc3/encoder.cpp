@@ -922,6 +922,10 @@ PCCTMC3Encoder3::quantization(const PCCPointSet3& src)
   if (_gps->geom_unique_points_flag) //This is when we don't keep duplicated points
     return quantizePositionsUniq(
       _srcToCodingScale, _originInCodingCoords, clampBox, src);
+  
+  if (_gps->custom_duplicate_retention_flag)
+    return quantizePositionsCustom(
+      _srcToCodingScale, _originInCodingCoords, clampBox, src);
 
   SrcMappedPointSet dst;
   quantizePositions(
