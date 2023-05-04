@@ -92,6 +92,18 @@ reducePointSet(const PCCPointSet3& src, UniqueFn uniqueFn, QFn qFn)
   if (src.hasLaserAngles())
     dst.cloud.addLaserAngles();
 
+  //----------------------------------check number of points with dst.srcIdxDupList[i]==i
+  int first_dup_count = 0;
+  int duplicated_point_count = 0;
+  int unique_point_count = 0;
+  for (int i = 0; i < numSrcPoints; i++) {
+    if (dst.srcIdxDupList[i]==i)
+      first_dup_count++;
+    if (dst.srcIdxDupList[i] >= 0)
+      duplicated_point_count++;
+    if (dst.srcIdxDupList[i] < 0)
+      unique_point_count++;
+  }
   // Generate dst outputs
   for (int i = 0, dstIdx = 0; i < numSrcPoints; ++i) {
     // Find head of each linked list
