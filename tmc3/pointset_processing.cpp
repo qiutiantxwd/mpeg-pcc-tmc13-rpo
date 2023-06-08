@@ -104,6 +104,12 @@ reducePointSet(const PCCPointSet3& src, UniqueFn uniqueFn, QFn qFn)
     if (dst.srcIdxDupList[i] < 0)
       unique_point_count++;
   }
+  // Debugging purpose: Quantize entire set
+  SrcMappedPointSet quantizedSrc;
+  quantizedSrc.cloud.resize(numSrcPoints);
+  for (int i = 0; i < numSrcPoints; i++) {
+    quantizedSrc.cloud[i] = qFn(src[i]);
+  }
   // Generate dst outputs
   for (int i = 0, dstIdx = 0; i < numSrcPoints; ++i) {
     // Find head of each linked list
@@ -159,6 +165,9 @@ reducePointSetCustom(const PCCPointSet3& src, UniqueFn uniqueFn, QFn qFn)
 
     numDstPoints = qPosToSrcIdx.size();// Number of unique points after duplicate removal. (New cloud not generate yet)
   }
+  // int numAllowedDup = _gps->custom_duplicate_retention_flag;
+  int numAllowedDup = 1000;
+  numDstPoints += numAllowedDup;// New custom number of points in dst
   // After the above block, qPosToSrcIdx saves
   // dst.srcIdxDupList saves
   // Number of quantised points is now known
@@ -168,16 +177,27 @@ reducePointSetCustom(const PCCPointSet3& src, UniqueFn uniqueFn, QFn qFn)
     dst.cloud.addLaserAngles();
 
   // Generate dst outputs
-  for (int i = 0, dstIdx = 0; i < numSrcPoints; ++i) {
+  int numDup = 0;
+  for (int i = 0, dstIdx = 0; i < numSrcPoints && dstIdx < numDstPoints; ++i) {
     // Find head of each linked list
-    if (dst.srcIdxDupList[i] >= 0)//Need to make changes to here so that we can add duplicated points as well. 
-      continue;
-
-    dst.srcIdxDupList[i] ^= 0x80000000; // 0b100...01 after XORing with 0x80000000 is 1
-    dst.idxToSrcIdx[dstIdx] = i;
-    if (src.hasLaserAngles() == true)
-      dst.cloud.setLaserAngle(dstIdx, src.getLaserAngle(i));
-    dst.cloud[dstIdx++] = qFn(src[i]);
+    if (dst.srcIdxDupList[i] >= 0) {//Need to make changes to here so that we can add duplicated points as well. 
+      if (numDup > numAllowedDup) continue;
+      else {
+        // dst.srcIdxDupList[i] ^= 0x80000000; // 0b100...01 after XORing with 0x80000000 is 1
+        dst.idxToSrcIdx[dstIdx] = i;
+        if (src.hasLaserAngles() == true)
+          dst.cloud.setLaserAngle(dstIdx, src.getLaserAngle(i));
+        dst.cloud[dstIdx++] = qFn(src[i]);
+        numDup++;       
+      }
+    }
+    else if (dst.srcIdxDupList[i] < 0) {
+      dst.srcIdxDupList[i] ^= 0x80000000; // 0b100...01 after XORing with 0x80000000 is 1
+      dst.idxToSrcIdx[dstIdx] = i;
+      if (src.hasLaserAngles() == true)
+        dst.cloud.setLaserAngle(dstIdx, src.getLaserAngle(i));
+      dst.cloud[dstIdx++] = qFn(src[i]);
+    }
   }
 
   // Add attribute storage to match src
