@@ -627,6 +627,9 @@ PCCTMC3Encoder3::compressPartition(
     std::cout << "positions processing time (user): "
               << total_user.count() / 1000.0 << " s" << std::endl;
 
+    std::cout << "Original points " << originPartCloud.getPointCount() << " points\n";
+    std::cout << "Unique points " << inputPointCloud.getPointCount() << " points\n";
+    
     callback->onOutputBuffer(payload);
   }
 
@@ -746,6 +749,7 @@ PCCTMC3Encoder3::compressPartition(
     double bpp_per_original = double(8 * coded_size) / originPartCloud.getPointCount();
     std::cout << label << "s bitstream size " << coded_size << " B (" << bpp
               << " bpp)\n";
+    
     std::cout << label << "s bpp per original point "<< bpp_per_original << " bpp\n";
 
     auto time_user = std::chrono::duration_cast<std::chrono::milliseconds>(
