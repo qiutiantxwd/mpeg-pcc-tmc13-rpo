@@ -747,7 +747,8 @@ PCCTMC3Encoder3::compressPartition(
 
     int coded_size = int(payload.size());
     double bpp = double(8 * coded_size) / inputPointCloud.getPointCount();
-    double bpp_per_original = double(8 * coded_size) / originPartCloud.getPointCount();
+    double bpp_per_original = originPartCloud.getPointCount() ? 
+      double(8 * coded_size) / originPartCloud.getPointCount() : double(8 * coded_size) / inputPointCloud.getPointCount();
     std::cout << label << "s bitstream size " << coded_size << " B (" << bpp
               << " bpp)\n";
     
