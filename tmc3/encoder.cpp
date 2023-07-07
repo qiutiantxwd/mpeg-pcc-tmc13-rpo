@@ -617,7 +617,8 @@ PCCTMC3Encoder3::compressPartition(
     clock_user.stop();
 
     double bpp = double(8 * payload.size()) / inputPointCloud.getPointCount();
-    double bpp_per_original = double(8 * payload.size()) / originPartCloud.getPointCount();
+    double bpp_per_original = originPartCloud.getPointCount() ? 
+      double(8 * payload.size()) / originPartCloud.getPointCount() : double(8 * payload.size()) / inputPointCloud.getPointCount();
     std::cout << "positions bitstream size " << payload.size() << " B (" << bpp
               << " bpp)\n";
     std::cout << "positions bpp per original point "<< bpp_per_original << " bpp\n";
