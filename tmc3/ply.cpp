@@ -112,7 +112,10 @@ ply::write(
       fout << "format binary_little_endian 1.0" << std::endl;
     }
   }
-  fout << "element vertex " << pointCount << std::endl;
+  // fout << "element vertex " << pointCount << std::endl;
+  fout << "element vertex ";
+  fout.write(reinterpret_cast<const char* const>(&pointCount), sizeof(int));
+  fout << std::endl;
   if (asAscii) {
     fout << "property float " << attributeNames.position[0] << std::endl;
     fout << "property float " << attributeNames.position[1] << std::endl;
@@ -163,8 +166,8 @@ ply::write(
     fout.open(fileName, std::ofstream::binary | std::ofstream::app);
     for (size_t i = 0; i < pointCount; ++i) {
       Vec3<double> position = cloud[i] * positionScale + positionOffset;
-      fout.write(
-        reinterpret_cast<const char* const>(&position), sizeof(double) * 3);
+      fout.write(reinterpret_cast<const char* const>(&position), sizeof(double) * 3);
+
       if (cloud.hasColors()) {
         const Vec3<attr_t>& c = cloud.getColor(i);
         Vec3<uint8_t> val8b{uint8_t(c[0]), uint8_t(c[1]), uint8_t(c[2])};
@@ -172,8 +175,7 @@ ply::write(
       }
       if (cloud.hasReflectances()) {
         const attr_t& reflectance = cloud.getReflectance(i);
-        fout.write(
-          reinterpret_cast<const char*>(&reflectance), sizeof(uint16_t));
+        fout.write(reinterpret_cast<const char*>(&reflectance), sizeof(uint16_t));
       }
       if (cloud.hasFrameIndex()) {
         const uint16_t& findex = cloud.getFrameIndex(i);
