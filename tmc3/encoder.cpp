@@ -631,7 +631,7 @@ PCCTMC3Encoder3::compressPartition(
     std::cout << "Original points " << originPartCloud.getPointCount() << " points\n";
     std::cout << "Unique points " << inputPointCloud.getPointCount() << " points\n";
     
-    callback->onOutputBuffer(payload);
+    callback->onOutputBuffer(payload); // This is where the compressed.bin is generated
   }
 
   // verify that the per-level slice constraint has been met
