@@ -368,6 +368,10 @@ struct SequenceParameterSet {
   // A value describing the scaling of the source positions prior to encoding.
   Rational seqGeomScale;
 
+  // @author Pengxi different quantization scales for different distances
+  std::vector<Rational> seqGeomScales;
+  int num_scales = 0;
+
   // Indicates that units used to interpret seqGeomScale.
   ScaleUnit seq_geom_scale_unit_flag;
 
@@ -445,6 +449,10 @@ struct GeometryParameterSet {
   //===================================Tian: Custom flag and values
   // Controls the ability to retain duplicated points in a custom manner
   bool custom_duplicate_retention_flag;
+
+  bool distance_base_flag; // @author Pengxi: compress the points cloud according to its distance
+  std::vector<float> split_points; // @author Pengxi: each point is a boundary point to separate the points into different sub-groups
+  int num_split_points;
 
   // The probability to retain a duplicated point;
   // double duplicate_retention_probability; 

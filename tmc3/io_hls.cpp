@@ -428,6 +428,16 @@ write(const SequenceParameterSet& sps)
   int seq_unit_denominator_minus1 = sps.seqGeomScale.denominator - 1;
   bs.writeUe(seq_unit_numerator_minus1);
   bs.writeUe(seq_unit_denominator_minus1);
+
+  // @author Pengxi added method to write the sps.seqGeomScales
+  bs.writeUe(sps.num_scales);
+  for(int i = 0; i < sps.num_scales; i++) {
+    seq_unit_numerator_minus1 = sps.seqGeomScales[i].numerator - 1;
+    seq_unit_denominator_minus1 = sps.seqGeomScales[i].denominator - 1;
+    bs.writeUe(seq_unit_numerator_minus1);
+    bs.writeUe(seq_unit_denominator_minus1);
+  }
+
   bs.writeUn(1, sps.seq_geom_scale_unit_flag);
 
   bs.writeUe(sps.global_scale_mul_log2());
@@ -514,12 +524,25 @@ parseSps(const PayloadBuffer& buf)
 
   int seq_unit_numerator_minus1;
   int seq_unit_denominator_minus1;
+
   bs.readUe(&seq_unit_numerator_minus1);
   bs.readUe(&seq_unit_denominator_minus1);
-  bs.readUn(1, &sps.seq_geom_scale_unit_flag);
-
   sps.seqGeomScale.numerator = seq_unit_numerator_minus1 + 1;
   sps.seqGeomScale.denominator = seq_unit_denominator_minus1 + 1;
+
+  // @author Pengxi added method to read the sps.seqGeomScales
+  bs.readUe(&sps.num_scales);
+  sps.seqGeomScales.resize(sps.num_scales);
+  for(int i = 0; i < sps.num_scales; i++) {
+    bs.readUe(&seq_unit_numerator_minus1);
+    bs.readUe(&seq_unit_denominator_minus1);
+    sps.seqGeomScales[i].numerator = seq_unit_numerator_minus1 + 1;
+    sps.seqGeomScales[i].denominator = seq_unit_denominator_minus1 + 1;
+  }
+
+  bs.readUn(1, &sps.seq_geom_scale_unit_flag);
+
+
 
   bs.readUe(&sps.global_scale_mul_log2());
   bs.readUe(&sps.global_scale_fp_bits());
@@ -596,6 +619,15 @@ write(const SequenceParameterSet& sps, const GeometryParameterSet& gps)
   bs.write(gps.geom_box_log2_scale_present_flag);
   if (!gps.geom_box_log2_scale_present_flag)
     bs.writeUe(gps.gps_geom_box_log2_scale);
+
+  // @author Pengxi write the distance-based-related params
+  bs.write(gps.distance_base_flag);
+  if(gps.distance_base_flag) {
+    bs.writeUn(4, gps.num_split_points);
+    for(int i = 0; i < gps.num_split_points; i++) {
+      bs.writeF(gps.split_points[i]);
+    }
+  }
 
   bs.write(gps.geom_unique_points_flag);
 
@@ -717,6 +749,16 @@ parseGps(const PayloadBuffer& buf)
   bs.read(&gps.geom_box_log2_scale_present_flag);
   if (!gps.geom_box_log2_scale_present_flag)
     bs.readUe(&gps.gps_geom_box_log2_scale);
+
+  // @author Pengxi read the distance-based-related params
+  bs.read(&gps.distance_base_flag);
+  if(gps.distance_base_flag) {
+    bs.readUn(4, &gps.num_split_points);
+    gps.split_points.resize(gps.num_split_points);
+    for(int i = 0; i < gps.num_split_points; i++) {
+      bs.readF(&gps.split_points[i]);
+    }
+  }
 
   bs.read(&gps.geom_unique_points_flag);
 

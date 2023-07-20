@@ -728,6 +728,24 @@ ParseParameters(int argc, char* argv[], Parameters& params)
   params.encoder.gps.custom_duplicate_retention_flag, false,
   "Enables custom retention of duplicated points")
 
+  // @author Pengxi, add one more flag to enable distance-based compression
+  ("compressBasedOnDistance",
+  params.encoder.gps.distance_base_flag, false,
+  "Enables distance-based compression")
+
+  // @author Pengxi, add split points list
+  ("distanceSplitPoints",
+  params.encoder.gps.split_points, {},
+  "The split points to separate the points into different sub-groups, e.g. {10, 20} => 0-10, 10-20, 20+"
+  )
+
+  // @author Pengxi, add corresponding quantization scale list
+  ("positionQuantizationScales",
+  params.encoder.seqGeomScales, {},
+  "Each quantization scale corresponds to each distance span, should have one more element than split_points, "\
+  "should set positionQuantizationScale to 1"
+  )
+
   ("partitionMethod",
     params.encoder.partition.method, PartitionMethod::kUniformSquare,
     "Method used to partition input point cloud into slices/tiles:\n"

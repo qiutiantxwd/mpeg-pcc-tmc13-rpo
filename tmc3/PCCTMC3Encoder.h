@@ -139,6 +139,9 @@ struct EncoderParams {
   // precision expected for attributes after scaling with predgeom
   // and spherical coordinates
   int attrSphericalMaxLog2;
+
+  // @author Pengxi
+  std::vector<double> seqGeomScales;
 };
 
 //============================================================================
