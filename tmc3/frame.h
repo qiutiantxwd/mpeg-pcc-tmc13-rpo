@@ -62,6 +62,9 @@ struct CloudFrame {
   // When outputUnit is ScaleUnit::kDimensionless, outputUnitLength is
   // measured in units of an external coordinate system.
   double outputUnitLength;
+  std::vector<size_t> sliceNums;
+  std::vector<Rational> outputUnitLengths;
+  bool distanceBased = false;
 
   // The unit of the output cloud's unit vector
   ScaleUnit outputUnit;

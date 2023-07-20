@@ -60,6 +60,10 @@ CloudFrame::setParametersFrom(
   this->outputFpBits = fixedPointBits;
   this->outputOrigin = sps.seqBoundingBoxOrigin;
   this->outputUnitLength = reciprocal(sps.seqGeomScale);
+  if(sps.seqGeomScales.size() != 0) {
+    this->distanceBased = true;
+    this->outputUnitLengths = reciprocal(sps.seqGeomScales);
+  }
   this->outputUnit = sps.seq_geom_scale_unit_flag;
   this->attrDesc = sps.attributeSets;
 }

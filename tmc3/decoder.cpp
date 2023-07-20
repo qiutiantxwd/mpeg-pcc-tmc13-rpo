@@ -185,6 +185,7 @@ PCCTMC3Decoder3::decompress(
         for (int k = 0; k < 3; k++)
           _currentPointCloud[i][k] += _sliceOrigin[k];
       _accumCloud.append(_currentPointCloud);
+      _outCloud.sliceNums.push_back(numPoints);
     }
   }
 

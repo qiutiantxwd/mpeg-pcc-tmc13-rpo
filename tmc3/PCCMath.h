@@ -564,6 +564,15 @@ reciprocal(const Rational x)
   return Rational(x.denominator, x.numerator);
 }
 
+inline std::vector<Rational>
+reciprocal(std::vector<Rational> xs)
+{
+  for(auto& x: xs) {
+    x = reciprocal(x);
+  }
+  return xs;
+}
+
 //===========================================================================
 
 template<typename T>
