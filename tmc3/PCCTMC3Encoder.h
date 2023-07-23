@@ -163,6 +163,13 @@ public:
     Callbacks*,
     CloudFrame* reconstructedCloud = nullptr);
 
+  // @author Pengxi declared a new compression method for different range types
+  int compressD(
+    const PCCPointSet3& inputPointCloud,
+    EncoderParams* params,
+    Callbacks*,
+    CloudFrame* reconstructedCloud = nullptr);
+
   void compressPartition(
     const PCCPointSet3& inputPointCloud,
     const PCCPointSet3& originPartCloud,
@@ -172,6 +179,10 @@ public:
 
   static void deriveParameterSets(EncoderParams* params);
   static void fixupParameterSets(EncoderParams* params);
+
+  // @author Pengxi declared a function to split the point cloud according to range types
+  std::vector<PCCPointSet3> splitPointSet
+    (const PCCPointSet3& src, std::vector<float> splitPoints, double inputScale);
 
 private:
   void appendSlice(PCCPointSet3& cloud);

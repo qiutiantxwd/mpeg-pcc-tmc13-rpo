@@ -150,7 +150,8 @@ PCCTMC3Decoder3::outputCurrentCloud(PCCTMC3Decoder3::Callbacks* callback)
   // todo: add other output scaling modes
   // NB: if accumCloud is reused for future inter-prediction, global scaling
   //     must be applied to a copy.
-  scaleGeometry(_outCloud.cloud, _sps->globalScale, _outCloud.outputFpBits);
+  // scaleGeometry(_outCloud.cloud, _sps->globalScale, _outCloud.outputFpBits);
+  scaleGeometrys(_outCloud.cloud, _globalScales, _outCloud.outputFpBits, _outCloud.sliceNums); // @author Pengxi
 
   callback->onOutputCloud(_outCloud);
 
@@ -169,6 +170,18 @@ PCCTMC3Decoder3::startFrame()
 
   // the following could be set once when the SPS is discovered
   _outCloud.setParametersFrom(*_sps, _params.outputFpBits);
+}
+
+// @author Pengxi a new way to start the new frame
+void
+PCCTMC3Decoder3::startFrameD()
+{
+  _outputInitialized = true;
+  _firstSliceInFrame = true;
+  _outCloud.frameNum = _frameCtr;
+
+  // the following could be set once when the SPS is discovered
+  _outCloud.setParametersFromD(*_sps, _params.outputFpBits);
 }
 
 //============================================================================
@@ -265,6 +278,120 @@ PCCTMC3Decoder3::decompress(
   case PayloadType::kGeneralizedAttrParamInventory: {
     if (!_outputInitialized)
       startFrame();
+
+    auto hdr = parseAttrParamInventoryHdr(*buf);
+    assert(hdr.attr_param_sps_attr_idx < int(_sps->attributeSets.size()));
+    auto& attrDesc = _outCloud.attrDesc[hdr.attr_param_sps_attr_idx];
+    parseAttrParamInventory(attrDesc, *buf, attrDesc.params);
+    return 0;
+  }
+
+  case PayloadType::kUserData: parseUserData(*buf); return 0;
+  }
+
+  // todo(df): error, unhandled payload type
+  return 1;
+}
+
+// @author Pengxi added our customized way to decode
+int
+PCCTMC3Decoder3::decompressD(
+  const PayloadBuffer* buf, PCCTMC3Decoder3::Callbacks* callback)
+{
+  // Starting a new geometry brick/slice/tile, transfer any
+  // finished points to the output accumulator
+  if (!buf || payloadStartsNewSlice(buf->type)) {
+    if (size_t numPoints = _currentPointCloud.getPointCount()) {
+      for (size_t i = 0; i < numPoints; i++)
+        for (int k = 0; k < 3; k++)
+          _currentPointCloud[i][k] += _sliceOrigin[k];
+      _accumCloud.append(_currentPointCloud);
+      _outCloud.sliceNums.push_back(numPoints);
+    }
+  }
+
+  if (!buf) {
+    // flush decoder, output pending cloud if any
+    outputCurrentCloud(callback);
+    return 0;
+  }
+
+  // process a frame boundary
+  //  - this may update FrameCtr
+  //  - this will activate the sps for GeometryBrick and AttrParamInventory
+  //  - after outputing the current frame, the output must be reinitialized
+  if (dectectFrameBoundary(buf)) {
+    // outputCurrentCloud(callback);
+    _outputInitialized = false;
+  }
+
+  // process the buffer
+  switch (buf->type) {
+  case PayloadType::kSequenceParameterSet: {
+    auto sps = parseSps(*buf);
+    convertXyzToStv(&sps);
+    _spss.clear(); // @author Pengxi
+    storeSps(std::move(sps));
+    _globalScales.push_back(sps.globalScale);
+    _outCloud.outputOrigins.push_back(sps.seqBoundingBoxOrigin);
+    _outCloud.outputUnitLengths.push_back(reciprocal(sps.seqGeomScale));
+    return 0;
+  }
+
+  case PayloadType::kGeometryParameterSet: {
+    auto gps = parseGps(*buf);
+    // HACK: assume that an SPS has been received prior to the GPS.
+    // This is not required, and parsing of the GPS is independent of the SPS.
+    // todo(df): move GPS fixup to activation process
+    _sps = &_spss.cbegin()->second;
+    convertXyzToStv(*_sps, &gps);
+    _gpss.clear(); // @author Pengxi
+    storeGps(std::move(gps));
+    return 0;
+  }
+
+  case PayloadType::kAttributeParameterSet: {
+    auto aps = parseAps(*buf);
+    // HACK: assume that an SPS has been received prior to the APS.
+    // This is not required, and parsing of the APS is independent of the SPS.
+    // todo(df): move APS fixup to activation process
+    _sps = &_spss.cbegin()->second;
+    convertXyzToStv(*_sps, &aps);
+    _apss.clear(); // @author Pengxi
+    storeAps(std::move(aps));
+    return 0;
+  }
+
+  case PayloadType::kFrameBoundaryMarker:
+    if (!_outputInitialized)
+      startFrameD();
+    return 0;
+
+  case PayloadType::kGeometryBrick:
+    if (!_outputInitialized)
+      startFrameD();
+
+    // avoid accidents with stale attribute decoder on next slice
+    _attrDecoder.reset();
+    // Avoid dropping an actual frame
+    _suppressOutput = false;
+    return decodeGeometryBrick(*buf);
+
+  case PayloadType::kAttributeBrick: decodeAttributeBrick(*buf); return 0;
+
+  case PayloadType::kConstantAttribute:
+    decodeConstantAttribute(*buf);
+    return 0;
+
+  case PayloadType::kTileInventory:
+    // NB: the tile inventory is decoded in xyz order.  It may need
+    //     conversion if it is used (it currently isn't).
+    storeTileInventory(parseTileInventory(*buf));
+    return 0;
+
+  case PayloadType::kGeneralizedAttrParamInventory: {
+    if (!_outputInitialized)
+      startFrameD();
 
     auto hdr = parseAttrParamInventoryHdr(*buf);
     assert(hdr.attr_param_sps_attr_idx < int(_sps->attributeSets.size()));

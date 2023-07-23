@@ -131,9 +131,13 @@ public:
 
   // determine the output ply scale factor
   double outputScale(const CloudFrame& cloud) const;
+  // @author Pengxi declared a new method to obtain the scales for different range types
+  std::vector<double> outputScales(const CloudFrame& cloud) const;
 
   // the output ply origin, scaled according to output coordinate system
   Vec3<double> outputOrigin(const CloudFrame& cloud) const;
+  // @author Pengxi declared a new method to obtain the origins for different range types
+  std::vector<Vec3<double>> outputOrigins(const CloudFrame& cloud) const;
 
   void scaleAttributesForInput(
     const std::vector<AttributeDescription>& attrDescs, PCCPointSet3& cloud);
@@ -521,6 +525,10 @@ namespace program_options_lite {
 void sanitizeEncoderOpts(
   Parameters& params, df::program_options_lite::ErrorReporter& err);
 
+// @author Pengxi declared a new function to adjust the params 
+// before compressing each range type's point cloud
+void adjustParams(
+  Parameters* params, size_t index);
 //---------------------------------------------------------------------------
 
 bool
@@ -685,6 +693,11 @@ ParseParameters(int argc, char* argv[], Parameters& params)
   ("decodeMaxPoints",
     params.decoder.decodeMaxPoints, 0,
     "Partially decode up to N points")
+
+  // @author Pengxi added a new option
+  ("distanceBased",
+  params.decoder.distanceBasedFlag, false,
+  "Whether the method is distance based")
 
   (po::Section("Encoder"))
 
@@ -1305,6 +1318,23 @@ sanitizeEncoderOpts(
   // a cloud with unit length 1mm.
   params.encoder.srcUnitLength /= params.inputScale;
 
+  // @author Pengxi
+  if(params.encoder.gps.distance_base_flag) {
+    assert(params.encoder.seqGeomScales.size() > 1);
+    assert(params.encoder.gps.split_points.size() == params.encoder.seqGeomScales.size()-1);
+    params.encoder.sps.num_scales = params.encoder.seqGeomScales.size();
+    params.encoder.sps.seqGeomScales.resize(params.encoder.seqGeomScales.size());
+    params.encoder.gps.num_split_points = params.encoder.gps.split_points.size();
+  } else {
+    assert(params.encoder.seqGeomScales.size() == 0);
+    assert(params.encoder.gps.split_points.size() == 0);
+    params.encoder.seqGeomScales.clear();
+    params.encoder.seqGeomScales.push_back(params.encoder.seqGeomScale);
+    params.encoder.sps.seqGeomScales.resize(1);
+    params.encoder.sps.num_scales = 1;
+    params.encoder.gps.num_split_points = 0;
+  }
+
   // global scale factor must be positive
   if (params.encoder.codedGeomScale > params.encoder.seqGeomScale) {
     err.warn() << "codingScale must be <= sequenceScale, adjusting\n";
@@ -1675,6 +1705,27 @@ sanitizeEncoderOpts(
   }
 }
 
+// @author Pengxi implemented the function to adjust the params before compressing each range type's
+// point cloud
+void adjustParams(Parameters* params, size_t index) {
+  params->encoder.seqGeomScale = params->encoder.seqGeomScales[index];
+
+  // global scale factor must be positive
+  if (params->encoder.codedGeomScale > params->encoder.seqGeomScale) {
+    params->encoder.codedGeomScale = params->encoder.seqGeomScale;
+  }
+
+  params->encoder.gps.angularZ.clear();
+  for (auto val : params->encoder.lasersZ) {
+      int one = 1 << 3;
+      auto scale = params->encoder.codedGeomScale;
+      if (params->encoder.gps.predgeom_enabled_flag)
+        scale = params->encoder.codedGeomScale / params->encoder.seqGeomScale;
+
+      params->encoder.gps.angularZ.push_back(round(val * scale * one));
+    }
+}
+
 //============================================================================
 
 SequenceEncoder::SequenceEncoder(Parameters* params) : SequenceCodec(params)
@@ -1710,7 +1761,7 @@ SequenceEncoder::compress(Stopwatch* clock)
 }
 
 //----------------------------------------------------------------------------
-
+// @author Pengxi changed overall structure
 int
 SequenceEncoder::compressOneFrame(Stopwatch* clock)
 {
@@ -1723,44 +1774,64 @@ SequenceEncoder::compressOneFrame(Stopwatch* clock)
     return -1;
   }
 
-  // Some evaluations wish to scan the points in azimuth order to simulate
-  // real-time acquisition (since the input has lost its original order).
-  // NB: because this is trying to emulate the input order, binning is disabled
-  if (params->sortInputByAzimuth)
-    sortByAzimuth(
-      pointCloud, 0, pointCloud.getPointCount(), 0., _angularOrigin);
+  std::vector<PCCPointSet3> pointClouds = 
+      encoder.splitPointSet(pointCloud, params->encoder.gps.split_points, params->inputScale);
 
-  // Sanitise the input point cloud
-  // todo(df): remove the following with generic handling of properties
-  bool codeColour = params->encoder.attributeIdxMap.count("color");
-  if (!codeColour)
-    pointCloud.removeColors();
-  assert(codeColour == pointCloud.hasColors());
-
-  bool codeReflectance = params->encoder.attributeIdxMap.count("reflectance");
-  if (!codeReflectance)
-    pointCloud.removeReflectances();
-  assert(codeReflectance == pointCloud.hasReflectances());
-
-  clock->start();
-
-  if (params->convertColourspace)
-    convertFromGbr(params->encoder.sps.attributeSets, pointCloud);
-
-  scaleAttributesForInput(params->encoder.sps.attributeSets, pointCloud);
-
-  // The reconstructed point cloud
   CloudFrame recon;
-  auto* reconPtr = params->reconstructedDataPath.empty() ? nullptr : &recon;
+    auto* reconPtr = params->reconstructedDataPath.empty() ? nullptr : &recon;
 
+  Parameters* params_bak = new Parameters(*params);
   auto bytestreamLenFrameStart = bytestreamFile.tellp();
 
-  int ret = encoder.compress(pointCloud, &params->encoder, this, reconPtr);
-  if (ret) {
-    cout << "Error: can't compress point cloud!" << endl;
-    return -1;
-  }
+  for(size_t i = 0; i < pointClouds.size(); i++) {
+    PCCPointSet3 pointCloud = pointClouds[i];
+    *params = *params_bak;
+    adjustParams(params, i);
+    
+    // Some evaluations wish to scan the points in azimuth order to simulate
+    // real-time acquisition (since the input has lost its original order).
+    // NB: because this is trying to emulate the input order, binning is disabled
+    if (params->sortInputByAzimuth)
+      sortByAzimuth(
+        pointCloud, 0, pointCloud.getPointCount(), 0., _angularOrigin);
 
+    // Sanitise the input point cloud
+    // todo(df): remove the following with generic handling of properties
+    bool codeColour = params->encoder.attributeIdxMap.count("color");
+    if (!codeColour)
+      pointCloud.removeColors();
+    assert(codeColour == pointCloud.hasColors());
+
+    bool codeReflectance = params->encoder.attributeIdxMap.count("reflectance");
+    if (!codeReflectance)
+      pointCloud.removeReflectances();
+    assert(codeReflectance == pointCloud.hasReflectances());
+
+    clock->start();
+
+    if (params->convertColourspace)
+      convertFromGbr(params->encoder.sps.attributeSets, pointCloud);
+
+    scaleAttributesForInput(params->encoder.sps.attributeSets, pointCloud);
+
+    // The reconstructed point cloud
+    
+    int ret;
+    if(params->encoder.gps.distance_base_flag) {
+      ret = encoder.compressD(pointClouds[i], &params->encoder, this, reconPtr);
+    } else {
+      ret = encoder.compress(pointClouds[i], &params->encoder, this, reconPtr);
+    }
+    
+
+    if (ret) {
+      cout << "Error: can't compress point cloud!" << endl;
+      return -1;
+    }
+  }
+  
+
+  
   auto bytestreamLenFrameEnd = bytestreamFile.tellp();
   int frameLen = bytestreamLenFrameEnd - bytestreamLenFrameStart;
   std::cout << "Total frame size " << frameLen << " B" << std::endl;
@@ -1770,6 +1841,7 @@ SequenceEncoder::compressOneFrame(Stopwatch* clock)
   if (reconPtr)
     writeOutputFrame(params->reconstructedDataPath, {}, recon, recon.cloud);
 
+  delete params_bak;
   return 0;
 }
 
@@ -1828,7 +1900,15 @@ SequenceDecoder::decompress(Stopwatch* clock)
     if (!fin)
       buf_ptr = nullptr;
 
-    if (decoder.decompress(buf_ptr, this)) {
+    // @author Pengxi, the content is modified here to allow different methods
+    int ret;
+    if(params->decoder.distanceBasedFlag) {
+      ret = decoder.decompressD(buf_ptr, this);
+    } else {
+      ret = decoder.decompress(buf_ptr, this);
+    }
+
+    if (ret) {
       cout << "Error: can't decompress point cloud!" << endl;
       return -1;
     }
@@ -1876,6 +1956,24 @@ SequenceCodec::outputScale(const CloudFrame& frame) const
   }
 }
 
+// @author Pengxi implemented a new method to obtain the scales for different range types
+std::vector<double>
+SequenceCodec::outputScales(const CloudFrame& frame) const
+{
+  switch (params->outputSystem) {
+  case OutputSystem::kConformance: return std::vector<double>(frame.sliceNums.size(), 1.);
+
+  case OutputSystem::kExternal:
+    // The scaling converts from the frame's unit length to configured output.
+    // In terms of specification this is the external coordinate system.
+    std::vector<double> scales(frame.outputUnitLengths.size(), 0.);
+    for(size_t i = 0; i < frame.outputUnitLengths.size(); i++) {
+      scales[i] = frame.outputUnitLengths[i] / params->outputUnitLength;
+    }
+    return scales;
+  }
+}
+
 //----------------------------------------------------------------------------
 
 Vec3<double>
@@ -1885,6 +1983,23 @@ SequenceCodec::outputOrigin(const CloudFrame& frame) const
   case OutputSystem::kConformance: return 0.;
 
   case OutputSystem::kExternal: return frame.outputOrigin * outputScale(frame);
+  }
+}
+
+// @author Pengxi implemented a new method to obtain the origins for different range types
+std::vector<Vec3<double>>
+SequenceCodec::outputOrigins(const CloudFrame& frame) const
+{
+  switch (params->outputSystem) {
+  case OutputSystem::kConformance: return std::vector<Vec3<double>>(frame.outputOrigins.size(), 0.);
+
+  case OutputSystem::kExternal: 
+    std::vector<Vec3<double>> origins(frame.outputOrigins.size(), 0.);
+    auto scales = outputScales(frame);
+    for(size_t i = 0; i < frame.outputOrigins.size(); i++) {
+      origins[i] = frame.outputOrigins[i] * scales[i];
+    }
+    return origins;
   }
 }
 
@@ -1920,10 +2035,28 @@ SequenceCodec::writeOutputFrame(
 
   auto plyScale = outputScale(frame) / (1 << frame.outputFpBits);
   auto plyOrigin = outputOrigin(frame);
+
+  // @author Pengxi modified this part so we will enter different decode method
+  // when we use or not the range-based compression method
+  auto plyScales = outputScales(frame);
+  for(auto& scale: plyScales) {
+    scale /= (1 << frame.outputFpBits);
+  }
+  auto plyOrigins = outputOrigins(frame);
+
   std::string decName{expandNum(postInvScalePath, frameNum)};
-  if (!ply::write(
+
+  int ret;
+  if(plyScales.size() <= 1) {
+    ret = ply::write(
         cloud, attrNames, plyScale, plyOrigin, decName,
-        !params->outputBinaryPly)) {
+        !params->outputBinaryPly);
+  } else {
+    ret = ply::writeD(
+        cloud, attrNames, plyScales, plyOrigins, frame.sliceNums, decName,
+        !params->outputBinaryPly);
+  }
+  if (!ret) {
     cout << "Error: can't open output file!" << endl;
   }
 }

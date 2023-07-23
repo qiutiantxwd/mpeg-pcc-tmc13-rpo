@@ -74,6 +74,16 @@ namespace ply {
     const std::string& fileName,
     bool asAscii);
 
+  // @author Pengxi declared a new method to write the file
+  bool writeD(
+    const PCCPointSet3& pointCloud,
+    const PropertyNameMap& propertyNames,
+    std::vector<double> positionScales,
+    std::vector<Vec3<double>> positionOffsets,
+    std::vector<size_t> sliceNums,
+    const std::string& fileName,
+    bool asAscii);
+
   ///
   // Read @a pointCloud to a PLY file called @a fileName.
   // Point positions are scaled by positionScale and converted to integers.

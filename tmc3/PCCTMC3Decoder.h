@@ -62,6 +62,9 @@ struct DecoderParams {
 
   // Number of fractional bits used in output position representation.
   int outputFpBits;
+
+  // @author Pengxi added a new param indicating whether we should use custom decompression method
+  bool distanceBasedFlag;
 };
 
 //============================================================================
@@ -80,6 +83,8 @@ public:
   void init();
 
   int decompress(const PayloadBuffer* buf, Callbacks* callback);
+  // @author Pengxi declare a new compress method based on different range types
+  int decompressD(const PayloadBuffer* buf, Callbacks* callback);
 
   //==========================================================================
 
@@ -99,6 +104,9 @@ private:
   bool dectectFrameBoundary(const PayloadBuffer* buf);
   void outputCurrentCloud(Callbacks* callback);
   void startFrame();
+
+  // @author Pengxi
+  void startFrameD();
 
   //==========================================================================
 
@@ -151,6 +159,10 @@ private:
   // The active SPS
   const SequenceParameterSet* _sps;
   const GeometryParameterSet* _gps;
+
+  // @author Pengxi, used to save the global scales for different range types
+
+  std::vector<SequenceParameterSet::GlobalScale> _globalScales;
 
   GeometryBrickHeader _gbh;
 

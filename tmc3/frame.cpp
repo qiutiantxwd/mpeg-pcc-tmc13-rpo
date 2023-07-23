@@ -60,10 +60,41 @@ CloudFrame::setParametersFrom(
   this->outputFpBits = fixedPointBits;
   this->outputOrigin = sps.seqBoundingBoxOrigin;
   this->outputUnitLength = reciprocal(sps.seqGeomScale);
-  if(sps.seqGeomScales.size() != 0) {
-    this->distanceBased = true;
-    this->outputUnitLengths = reciprocal(sps.seqGeomScales);
+  // if(sps.seqGeomScales.size() != 0) {
+  //   this->distanceBased = true;
+  //   this->outputUnitLengths = reciprocal(sps.seqGeomScales);
+  // }
+  this->outputUnit = sps.seq_geom_scale_unit_flag;
+  this->attrDesc = sps.attributeSets;
+}
+
+// @author Pengxi, a new parameter setting method to deal with multiple ranges
+void
+CloudFrame::setParametersFromD(
+  const SequenceParameterSet& sps, int fixedPointBits)
+{
+  // How many bits should be preserved during global scaling:
+  //  -1: all
+  //   n: n bits, limited to all
+  if (fixedPointBits) {
+    int gsFracBits = ilog2(uint32_t(Rational(sps.globalScale).denominator));
+    if (fixedPointBits < 0)
+      fixedPointBits = gsFracBits;
+    else
+      fixedPointBits = std::min(fixedPointBits, gsFracBits);
   }
+
+  this->geometry_axis_order = sps.geometry_axis_order;
+  this->outputFpBits = fixedPointBits;
+  this->outputOrigin = sps.seqBoundingBoxOrigin;
+  // this->outputOrigins.push_back(sps.seqBoundingBoxOrigin);
+  this->outputUnitLength = reciprocal(sps.seqGeomScale);
+  // if(sps.seqGeomScales.size() != 0) {
+  //   this->distanceBased = true;
+  //   this->outputUnitLengths = reciprocal(sps.seqGeomScales);
+  // }
+  // this->outputUnitLengths.push_back(reciprocal(sps.seqGeomScale));
+  
   this->outputUnit = sps.seq_geom_scale_unit_flag;
   this->attrDesc = sps.attributeSets;
 }
@@ -99,6 +130,42 @@ scaleGeometry(
   }
 }
 
+
+// @author Pengxi scale the geometrys when we have multiple different scales
+void
+scaleGeometrys(
+  PCCPointSet3& cloud,
+  const std::vector<SequenceParameterSet::GlobalScale>& globalScales,
+  int fixedPointFracBits,
+  const std::vector<size_t> sliceNums)
+{
+  // Conversion to rational simplifies the globalScale expression.
+  size_t count = 0;
+  for(size_t i = 0; i < globalScales.size(); i++) {
+    Rational gs = globalScales[i];
+
+    // NB: by definition, gs.denominator is a power of two.
+    int gsDenominatorLog2 = ilog2(uint32_t(gs.denominator));
+
+    // appliy fixed-point scaling to numerator, removing common factor
+    gs.numerator <<= std::max(fixedPointFracBits - gsDenominatorLog2, 0);
+    gsDenominatorLog2 = std::max(gsDenominatorLog2 - fixedPointFracBits, 0);
+    gs.denominator = 1 << gsDenominatorLog2;
+
+    // Nothing to do if scale factor is 1.
+    if (gs.numerator == gs.denominator)
+      return;
+
+    // The scaling here is equivalent to the fixed-point conformance output
+    // size_t numPoints = cloud.getPointCount();
+    
+    for (size_t i = 0; i < sliceNums[i]; i++) {
+      auto& pos = cloud[count];
+      pos = (pos * gs.numerator + (gs.denominator >> 1)) >> gsDenominatorLog2;
+      count++;
+    }
+  }
+}
 //============================================================================
 
 }  // namespace pcc

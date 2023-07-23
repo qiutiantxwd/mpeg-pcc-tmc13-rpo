@@ -187,6 +187,128 @@ ply::write(
   return true;
 }
 
+// @author Pengxi implemented a new method to write the output file
+bool
+ply::writeD(
+  const PCCPointSet3& cloud,
+  const PropertyNameMap& attributeNames,
+  std::vector<double> positionScales,
+  std::vector<Vec3<double>> positionOffsets,
+  std::vector<size_t> sliceNums,
+  const std::string& fileName,
+  bool asAscii)
+{
+  std::ofstream fout(fileName, std::ofstream::out);
+  if (!fout.is_open()) {
+    return false;
+  }
+
+  const size_t pointCount = cloud.getPointCount();
+  fout << "ply" << std::endl;
+
+  if (asAscii) {
+    fout << "format ascii 1.0" << std::endl;
+  } else {
+    PCCEndianness endianess = PCCSystemEndianness();
+    if (endianess == PCC_BIG_ENDIAN) {
+      fout << "format binary_big_endian 1.0" << std::endl;
+    } else {
+      fout << "format binary_little_endian 1.0" << std::endl;
+    }
+  }
+  // fout << "element vertex " << pointCount << std::endl;
+  fout << "element vertex ";
+  fout.write(reinterpret_cast<const char* const>(&pointCount), sizeof(int));
+  fout << std::endl;
+  if (asAscii) {
+    fout << "property float " << attributeNames.position[0] << std::endl;
+    fout << "property float " << attributeNames.position[1] << std::endl;
+    fout << "property float " << attributeNames.position[2] << std::endl;
+  } else {
+    fout << "property float64 " << attributeNames.position[0] << std::endl;
+    fout << "property float64 " << attributeNames.position[1] << std::endl;
+    fout << "property float64 " << attributeNames.position[2] << std::endl;
+  }
+
+  if (cloud.hasColors()) {
+    fout << "property uchar green" << std::endl;
+    fout << "property uchar blue" << std::endl;
+    fout << "property uchar red" << std::endl;
+  }
+  if (cloud.hasReflectances()) {
+    fout << "property uint16 refc" << std::endl;
+  }
+  if (cloud.hasFrameIndex()) {
+    fout << "property uint8 frameindex" << std::endl;
+  }
+  fout << "element face 0" << std::endl;
+  fout << "property list uint8 int32 vertex_index" << std::endl;
+  fout << "end_header" << std::endl;
+  if (asAscii) {
+    //      fout << std::setprecision(std::numeric_limits<double>::max_digits10);
+    fout << std::fixed << std::setprecision(5);
+
+    size_t count = 0;
+    for(size_t l = 0; l < sliceNums.size(); l++) {
+      auto positionScale = positionScales[l];
+      auto positionOffset = positionOffsets[l];
+
+      for (size_t i = 0; i < sliceNums[l]; ++i) {
+        Vec3<double> position = cloud[count] * positionScale + positionOffset;
+        fout << position.x() << " " << position.y() << " " << position.z();
+        if (cloud.hasColors()) {
+          const Vec3<attr_t>& color = cloud.getColor(count);
+          fout << " " << static_cast<int>(color[0]) << " "
+              << static_cast<int>(color[1]) << " "
+              << static_cast<int>(color[2]);
+        }
+        if (cloud.hasReflectances()) {
+          fout << " " << static_cast<int>(cloud.getReflectance(count));
+        }
+        if (cloud.hasFrameIndex()) {
+          fout << " " << static_cast<int>(cloud.getFrameIndex(count));
+        }
+        fout << std::endl;
+        count++;
+      }
+    }
+      
+  } else {
+    fout.clear();
+    fout.close();
+    fout.open(fileName, std::ofstream::binary | std::ofstream::app);
+
+    size_t count = 0;
+    for(size_t l = 0; l < sliceNums.size(); l++) {
+      auto positionScale = positionScales[l];
+      auto positionOffset = positionOffsets[l];
+
+      for (size_t i = 0; i < sliceNums[l]; ++i) {
+        Vec3<double> position = cloud[count] * positionScale + positionOffset;
+        fout.write(reinterpret_cast<const char* const>(&position), sizeof(double) * 3);
+
+        if (cloud.hasColors()) {
+          const Vec3<attr_t>& c = cloud.getColor(count);
+          Vec3<uint8_t> val8b{uint8_t(c[0]), uint8_t(c[1]), uint8_t(c[2])};
+          fout.write(reinterpret_cast<const char*>(&val8b), sizeof(uint8_t) * 3);
+        }
+        if (cloud.hasReflectances()) {
+          const attr_t& reflectance = cloud.getReflectance(count);
+          fout.write(reinterpret_cast<const char*>(&reflectance), sizeof(uint16_t));
+        }
+        if (cloud.hasFrameIndex()) {
+          const uint16_t& findex = cloud.getFrameIndex(count);
+          fout.write(reinterpret_cast<const char*>(&findex), sizeof(uint16_t));
+        }
+
+        count++;
+      }
+    }
+  }
+  fout.close();
+  return true;
+}
+
 //============================================================================
 
 bool

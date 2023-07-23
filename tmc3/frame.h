@@ -63,7 +63,8 @@ struct CloudFrame {
   // measured in units of an external coordinate system.
   double outputUnitLength;
   std::vector<size_t> sliceNums;
-  std::vector<Rational> outputUnitLengths;
+  // @author Pengxi, multiple unit lengths for different range types
+  std::vector<double> outputUnitLengths;
   bool distanceBased = false;
 
   // The unit of the output cloud's unit vector
@@ -72,6 +73,8 @@ struct CloudFrame {
   // The origin of the output cloud
   // NB: this respects geometry_axis_order.
   Vec3<int> outputOrigin;
+  // @author Pengxi, multiple origins for different range types
+  std::vector<Vec3<int>> outputOrigins; 
 
   // Number of fractional bits in representaiton of cloud.positions.
   int outputFpBits;
@@ -87,6 +90,7 @@ struct CloudFrame {
 
   // Determines parameters according to the sps.
   void setParametersFrom(const SequenceParameterSet& sps, int fixedPointBits);
+  void setParametersFromD(const SequenceParameterSet& sps, int fixedPointBits);
 };
 
 //============================================================================
@@ -96,6 +100,13 @@ void scaleGeometry(
   PCCPointSet3& cloud,
   const SequenceParameterSet::GlobalScale& globalScale,
   int fixedPointFracBits);
+
+// @author Pengxi declaration of the new sclae function
+void scaleGeometrys(
+  PCCPointSet3& cloud,
+  const std::vector<SequenceParameterSet::GlobalScale>& globalScales,
+  int fixedPointFracBits,
+  const std::vector<size_t> sliceNums);
 
 //============================================================================
 

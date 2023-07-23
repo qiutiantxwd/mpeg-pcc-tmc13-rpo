@@ -69,6 +69,7 @@ PCCPointSet3 getPartition(
 
 //============================================================================
 
+
 PCCTMC3Encoder3::PCCTMC3Encoder3() : _frameCounter(-1)
 {
   _ctxtMemOctreeGeom.reset(new GeometryOctreeContexts);
@@ -431,6 +432,12 @@ PCCTMC3Encoder3::deriveParameterSets(EncoderParams* params)
   //
   // NB: seq_geom_scale is the reciprocal of unit length
   params->sps.seqGeomScale = params->seqGeomScale / params->extGeomScale;
+
+  // @author Pengxi
+  assert(params->seqGeomScales.size() == params->sps.seqGeomScales.size());
+  for(size_t i = 0; i < params->seqGeomScales.size(); i++) {
+    params->sps.seqGeomScales[i] = params->seqGeomScales[i] / params->extGeomScale;
+  }
 
   // Global scaling converts from the coded scale to the sequence scale
   // NB: globalScale is constrained, eg 1.1 is not representable
@@ -943,6 +950,41 @@ PCCTMC3Encoder3::quantization(const PCCPointSet3& src)
   return dst;
 }
 
+
+// @author Pengxi
+std::vector<PCCPointSet3>
+PCCTMC3Encoder3::splitPointSet(const PCCPointSet3& src, std::vector<float> splitPoints, double inputScale) {
+  if(splitPoints.size() == 0) {
+    return std::vector<PCCPointSet3> {src};
+  }
+
+  for(auto& splitPoint: splitPoints) {
+    splitPoint *= splitPoint;
+  }
+  size_t numSpans = splitPoints.size() + 1;
+
+  std::vector<std::vector<int32_t>> indexes;
+  indexes.resize(numSpans);
+
+  size_t pointCount = src.getPointCount();
+  for(int32_t i = 0; i < pointCount; i++) {
+    double distance = (double(src[i].x()) / inputScale) * (double(src[i].x()) / inputScale)
+                    + (double(src[i].y()) / inputScale) * (double(src[i].y()) / inputScale);
+    auto it = std::lower_bound(splitPoints.begin(), splitPoints.end(), distance);
+    int index = it - splitPoints.begin();
+
+    indexes[index].push_back(i);
+  }
+
+  std::vector<PCCPointSet3> pointSets;
+  for(auto pointIndexes: indexes) {
+    pointSets.push_back(getPartition(src, pointIndexes));
+  }
+
+  return pointSets;
+}
+
+
 //----------------------------------------------------------------------------
 // get the partial point cloud according to required point indexes
 
@@ -1023,6 +1065,333 @@ getPartition(
   }
 
   return dst;
+}
+
+
+// @author Pengxi
+int
+PCCTMC3Encoder3::compressD(
+  const PCCPointSet3& inputPointCloud,
+  EncoderParams* params,
+  PCCTMC3Encoder3::Callbacks* callback,
+  CloudFrame* reconCloud)
+{
+  // start of frame
+
+
+  // Angular predictive geometry coding needs to determine spherical
+  // positions.  To avoid quantization of the input disturbing this:
+  //  - sequence scaling is replaced by decimation of the input
+  //  - any user-specified global scaling is honoured
+  _inputDecimationScale = 1.;
+  if (params->gps.predgeom_enabled_flag) {
+    _inputDecimationScale = params->codedGeomScale;
+    params->codedGeomScale /= params->seqGeomScale;
+    params->seqGeomScale = 1.;
+  }
+
+  deriveParameterSets(params);
+  fixupParameterSets(params);
+
+  _srcToCodingScale = params->codedGeomScale;
+
+  // Determine input bounding box (for SPS metadata) if not manually set
+  Box3<int> bbox;
+  if (params->autoSeqBbox)
+    bbox = inputPointCloud.computeBoundingBox();
+  else {
+    bbox.min = params->sps.seqBoundingBoxOrigin;
+    bbox.max = bbox.min + params->sps.seqBoundingBoxSize - 1;
+  }
+
+  // Note whether the bounding box size is defined
+  // todo(df): set upper limit using level
+  bool bboxSizeDefined = params->sps.seqBoundingBoxSize > 0;
+  if (!bboxSizeDefined)
+    params->sps.seqBoundingBoxSize = (1 << 21) - 1;
+
+  // Then scale the bounding box to match the reconstructed output
+  for (int k = 0; k < 3; k++) {
+    auto min_k = bbox.min[k];
+    auto max_k = bbox.max[k];
+
+    // the sps bounding box is in terms of the conformance scale
+    // not the source scale.
+    // NB: plus one to convert to range
+    min_k = std::round(min_k * params->seqGeomScale);
+    max_k = std::round(max_k * params->seqGeomScale);
+    params->sps.seqBoundingBoxOrigin[k] = min_k;
+    params->sps.seqBoundingBoxSize[k] = max_k - min_k + 1;
+
+    // Compensate the sequence origin such that source point (0,0,0) coded
+    // as P_c is reconstructed as (0,0,0):
+    //   0 = P_c * globalScale + seqOrigin
+    auto gs = Rational(params->sps.globalScale);
+    int rem = params->sps.seqBoundingBoxOrigin[k] % gs.numerator;
+    rem += rem < 0 ? gs.numerator : 0;
+    params->sps.seqBoundingBoxOrigin[k] -= rem;
+    params->sps.seqBoundingBoxSize[k] += rem;
+
+    // Convert the origin to coding coordinate system
+    _originInCodingCoords[k] = params->sps.seqBoundingBoxOrigin[k];
+    _originInCodingCoords[k] /= double(gs);
+  }
+
+  // Determine the number of bits to signal the bounding box
+  params->sps.sps_bounding_box_offset_bits =
+    numBits(params->sps.seqBoundingBoxOrigin.abs().max());
+
+  params->sps.sps_bounding_box_size_bits = bboxSizeDefined
+    ? numBits(params->sps.seqBoundingBoxSize.abs().max())
+    : 0;
+
+  // Determine the lidar head position in coding coordinate system
+  params->gps.gpsAngularOrigin *= _srcToCodingScale;
+  params->gps.gpsAngularOrigin -= _originInCodingCoords;
+
+  // determine the scale factors based on a characteristic of the
+  // acquisition system
+  if (params->gps.geom_angular_mode_enabled_flag) {
+    auto gs = Rational(params->sps.globalScale);
+    int maxX = (params->sps.seqBoundingBoxSize[0] - 1) / double(gs);
+    int maxY = (params->sps.seqBoundingBoxSize[1] - 1) / double(gs);
+    auto& origin = params->gps.gpsAngularOrigin;
+    int rx = std::max(std::abs(origin[0]), std::abs(maxX - origin[0]));
+    int ry = std::max(std::abs(origin[1]), std::abs(maxY - origin[1]));
+    int r = std::max(rx, ry);
+    int twoPi = 25735;
+    int maxLaserIdx = params->gps.numLasers() - 1;
+
+    if (params->gps.predgeom_enabled_flag) {
+      auto& gps = params->gps;
+      twoPi = 1 << (gps.geom_angular_azimuth_scale_log2_minus11 + 12);
+      r >>= params->gps.geom_angular_radius_inv_scale_log2;
+    }
+
+    // todo(df): handle the single laser case better
+    Box3<int> sphBox{0, {r, twoPi, maxLaserIdx}};
+    int refScale = params->gps.azimuth_scaling_enabled_flag
+      ? params->attrSphericalMaxLog2
+      : 0;
+    auto attr_coord_scale = normalisedAxesWeights(sphBox, refScale);
+    for (auto& aps : params->aps)
+      if (aps.spherical_coord_flag)
+        aps.attr_coord_scale = attr_coord_scale;
+  }
+
+  // Allocate storage for attribute contexts
+  _ctxtMemAttrs.resize(params->sps.attributeSets.size());
+  
+
+  // placeholder to "activate" the parameter sets
+  _sps = &params->sps;
+  _gps = &params->gps;
+  _aps.clear();
+  for (const auto& aps : params->aps) {
+    _aps.push_back(&aps);
+  }
+
+  // initial geometry IDs
+  _tileId = 0;
+  _sliceId = 0;
+  _sliceOrigin = Vec3<int>{0};
+  _firstSliceInFrame = true;
+
+  // Configure output coud
+  if (reconCloud) {
+    reconCloud->setParametersFrom(*_sps, params->outputFpBits);
+    reconCloud->frameNum = _frameCounter;
+  }
+
+  // Partition the input point cloud into tiles
+  //  - quantize the input point cloud (without duplicate point removal)
+  //  - inverse quantize the cloud above to get the initial-sized cloud
+  //  - if tile partitioning is enabled,partitioning function produces
+  //    vectors tileMaps which map tileIDs to point indexes.
+  //    Compute the tile metadata for each partition.
+  //  - if not, regard the whole input cloud as a single tile to facilitate
+  //    slice partitioning subsequent
+  //  todo(df):
+  PartitionSet partitions;
+  SrcMappedPointSet quantizedInput = quantization(inputPointCloud);// This is where reduction in points happen 
+
+  // write out all parameter sets prior to encoding
+  callback->onOutputBuffer(write(*_sps));
+  callback->onOutputBuffer(write(*_sps, *_gps));
+  for (const auto aps : _aps) {
+    callback->onOutputBuffer(write(*_sps, *aps));
+  }
+
+  std::vector<std::vector<int32_t>> tileMaps;
+  if (params->partition.tileSize) {
+    tileMaps = tilePartition(params->partition, quantizedInput.cloud);
+
+    // To tag the slice with the tile id there must be sufficient bits.
+    // todo(df): determine sps parameter from the paritioning?
+    assert(numBits(tileMaps.size() - 1) <= _sps->slice_tag_bits);
+
+    // Default is to use implicit tile ids (ie list index)
+    partitions.tileInventory.tile_id_bits = 0;
+
+    // all tileOrigins are relative to the sequence bounding box
+    partitions.tileInventory.origin = _sps->seqBoundingBoxOrigin;
+
+    // Get the bounding box of current tile and write it into tileInventory
+    partitions.tileInventory.tiles.resize(tileMaps.size());
+
+    // Convert tile bounding boxes to sequence coordinate system.
+    // A position in the box must remain in the box after conversion
+    // irrispective of how the decoder outputs positions (fractional | integer)
+    //   => truncate origin (eg, rounding 12.5 to 13 would not allow all
+    //      decoders to find that point).
+    //   => use next integer for upper coordinate.
+    double gs = Rational(_sps->globalScale);
+
+    for (int t = 0; t < tileMaps.size(); t++) {
+      Box3<int32_t> bbox = quantizedInput.cloud.computeBoundingBox(
+        tileMaps[t].begin(), tileMaps[t].end());
+
+      auto& tileIvt = partitions.tileInventory.tiles[t];
+      tileIvt.tile_id = t;
+      for (int k = 0; k < 3; k++) {
+        auto origin = std::trunc(bbox.min[k] * gs);
+        auto size = std::ceil(bbox.max[k] * gs) - origin + 1;
+        tileIvt.tileOrigin[k] = origin;
+        tileIvt.tileSize[k] = size;
+      }
+    }
+  } else {
+    tileMaps.emplace_back();
+    auto& tile = tileMaps.back();
+    for (int i = 0; i < quantizedInput.cloud.getPointCount(); i++)
+      tile.push_back(i);
+  }
+
+  if (partitions.tileInventory.tiles.size() > 1) {
+    auto& inventory = partitions.tileInventory;
+    assert(inventory.tiles.size() == tileMaps.size());
+    std::cout << "Tile number: " << tileMaps.size() << std::endl;
+    inventory.ti_seq_parameter_set_id = _sps->sps_seq_parameter_set_id;
+    inventory.ti_origin_bits_minus1 =
+      numBits(inventory.origin.abs().max()) - 1;
+
+    // The inventory comes into force on the first frame
+    inventory.ti_frame_ctr_bits = _sps->frame_ctr_bits;
+    inventory.ti_frame_ctr = _frameCounter & ((1 << _sps->frame_ctr_bits) - 1);
+
+    // Determine the number of bits for encoding tile sizes
+    int maxValOrigin = 1;
+    int maxValSize = 1;
+    for (const auto& entry : inventory.tiles) {
+      maxValOrigin = std::max(maxValOrigin, entry.tileOrigin.max());
+      maxValSize = std::max(maxValSize, entry.tileSize.max() - 1);
+    }
+    inventory.tile_origin_bits_minus1 = numBits(maxValOrigin) - 1;
+    inventory.tile_size_bits_minus1 = numBits(maxValSize) - 1;
+
+    callback->onOutputBuffer(write(*_sps, partitions.tileInventory));
+  }
+
+  // Partition the input point cloud
+  //  - get the partitial cloud of each tile
+  //  - partitioning function produces a list of point indexes, origin and
+  //    optional tile metadata for each partition.
+  //  - encode any tile metadata
+  //  NB: the partitioning method is required to ensure that the output
+  //      slices conform to any codec limits.
+  //  todo(df): consider requiring partitioning function to sort the input
+  //            points and provide ranges rather than a set of indicies.
+  do {
+    for (int t = 0; t < tileMaps.size(); t++) {
+      const auto& tile = tileMaps[t];
+      auto tile_id = partitions.tileInventory.tiles.empty()
+        ? 0
+        : partitions.tileInventory.tiles[t].tile_id;
+
+      // Get the point cloud of current tile and compute their bounding boxes
+      PCCPointSet3 tileCloud = getPartition(quantizedInput.cloud, tile);
+      Box3<int32_t> bbox = tileCloud.computeBoundingBox();
+
+      // Move the tile cloud to coodinate origin
+      // for the convenience of slice partitioning
+      for (int i = 0; i < tileCloud.getPointCount(); i++)
+        tileCloud[i] -= bbox.min;
+
+      // don't partition if partitioning would result in a single slice.
+      auto partitionMethod = params->partition.method;
+      if (tileCloud.getPointCount() < params->partition.sliceMaxPoints)
+        partitionMethod = PartitionMethod::kNone;
+
+      // use the largest trisoup node size as a partitioning boundary for
+      // consistency between slices with different trisoup node sizes.
+      int partitionBoundaryLog2 = 0;
+      if (!params->trisoupNodeSizesLog2.empty())
+        partitionBoundaryLog2 = *std::max_element(
+          params->trisoupNodeSizesLog2.begin(),
+          params->trisoupNodeSizesLog2.end());
+
+      //Slice partition of current tile
+      std::vector<Partition> curSlices;
+      switch (partitionMethod) {
+      case PartitionMethod::kNone:
+        curSlices = partitionNone(params->partition, tileCloud, tile_id);
+        break;
+
+      case PartitionMethod::kUniformGeom:
+        curSlices = partitionByUniformGeom(
+          params->partition, tileCloud, tile_id, partitionBoundaryLog2);
+        break;
+
+      case PartitionMethod::kUniformSquare:
+        curSlices = partitionByUniformSquare(
+          params->partition, tileCloud, tile_id, partitionBoundaryLog2);
+        break;
+
+      case PartitionMethod::kOctreeUniform:
+        curSlices =
+          partitionByOctreeDepth(params->partition, tileCloud, tile_id);
+        break;
+
+      case PartitionMethod::kNpoints:
+        curSlices = partitionByNpts(params->partition, tileCloud, tile_id);
+        break;
+      }
+      // Map slice indexes to tile indexes(the original indexes)
+      for (int i = 0; i < curSlices.size(); i++) {
+        for (int p = 0; p < curSlices[i].pointIndexes.size(); p++) {
+          curSlices[i].pointIndexes[p] = tile[curSlices[i].pointIndexes[p]];
+        }
+      }
+
+      partitions.slices.insert(
+        partitions.slices.end(), curSlices.begin(), curSlices.end());
+    }
+    std::cout << "Slice number: " << partitions.slices.size() << std::endl;
+  } while (0);
+
+  // Encode each partition:
+  //  - create a pointset comprising just the partitioned points
+  //  - compress
+  for (const auto& partition : partitions.slices) {
+    // create partitioned point set
+    PCCPointSet3 sliceCloud =
+      getPartition(quantizedInput.cloud, partition.pointIndexes);
+
+    PCCPointSet3 sliceSrcCloud =
+      getPartition(inputPointCloud, quantizedInput, partition.pointIndexes);
+
+    _sliceId = partition.sliceId;
+    _tileId = partition.tileId;
+    _sliceOrigin = sliceCloud.computeBoundingBox().min;
+    compressPartition(sliceCloud, sliceSrcCloud, params, callback, reconCloud);
+  }
+
+  // Apply global scaling to reconstructed point cloud
+  if (reconCloud)
+    scaleGeometry(
+      reconCloud->cloud, _sps->globalScale, reconCloud->outputFpBits);
+
+  return 0;
 }
 
 //============================================================================
