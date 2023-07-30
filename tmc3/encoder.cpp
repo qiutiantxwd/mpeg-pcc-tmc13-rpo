@@ -635,7 +635,7 @@ PCCTMC3Encoder3::compressPartition(
     std::cout << "positions processing time (user): "
               << total_user.count() / 1000.0 << " s" << std::endl;
 
-    std::cout << "Original points " << originPartCloud.getPointCount() << " points\n";
+    std::cout << "Original points " << (originPartCloud.getPointCount() ? originPartCloud.getPointCount() : inputPointCloud.getPointCount()) << " points\n";
     std::cout << "Unique points " << inputPointCloud.getPointCount() << " points\n";
     
     callback->onOutputBuffer(payload); // This is where the compressed.bin is generated
