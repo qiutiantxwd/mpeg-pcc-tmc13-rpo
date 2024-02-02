@@ -241,6 +241,7 @@ public:
   {
     withColors = false;
     withReflectances = false;
+    withElongations = false;
     withFrameIndex = false;
     withLaserAngles = false;
   }
@@ -254,10 +255,12 @@ public:
     swap(positions, other.positions);
     swap(colors, other.colors);
     swap(reflectances, other.reflectances);
+    swap(elongations, other.elongations);
     swap(frameidx, other.frameidx);
     swap(laserAngles, other.laserAngles);
     swap(withColors, other.withColors);
     swap(withReflectances, other.withReflectances);
+    swap(withElongations, other.withElongations);
     swap(withFrameIndex, other.withFrameIndex);
     swap(withLaserAngles, other.withLaserAngles);
   }
@@ -316,6 +319,35 @@ public:
   {
     withReflectances = false;
     reflectances.resize(0);
+  }
+
+
+  attr_t getElongation(const size_t index) const
+  {
+    assert(index < elongations.size() && withElongations);
+    return elongations[index];
+  }
+  attr_t& getElongation(const size_t index)
+  {
+    assert(index < elongations.size() && withElongations);
+    return elongations[index];
+  }
+  void setElongation(const size_t index, const attr_t elongation)
+  {
+    assert(index < elongations.size() && withElongations);
+    elongations[index] = elongation;
+  }
+
+  bool hasElongations() const { return withElongations; }
+  void addElongations()
+  {
+    withElongations = true;
+    resize(getPointCount());
+  }
+  void removeElongations()
+  {
+    withElongations = false;
+    elongations.resize(0);
   }
 
   uint8_t getFrameIndex(const size_t index) const
@@ -408,6 +440,25 @@ public:
     ref.hasColors() ? addColors() : removeColors();
     ref.hasReflectances() ? addReflectances() : removeReflectances();
     ref.hasLaserAngles() ? addLaserAngles() : removeLaserAngles();
+    ref.hasElongations() ? addElongations(): removeElongations();
+  }
+
+  void addRemoveAttributes(bool withColors, bool withReflectances, bool withElongations)
+  {
+    if (withColors)
+      addColors();
+    else
+      removeColors();
+
+    if (withReflectances)
+      addReflectances();
+    else
+      removeReflectances();
+
+    if (withElongations)
+      addElongations();
+    else
+      removeElongations();
   }
 
   size_t getPointCount() const { return positions.size(); }
@@ -419,6 +470,9 @@ public:
     }
     if (hasReflectances()) {
       reflectances.resize(size);
+    }
+    if (hasElongations()) {
+      elongations.resize(size);
     }
     if (hasFrameIndex()) {
       frameidx.resize(size);
@@ -437,6 +491,9 @@ public:
     if (hasReflectances()) {
       reflectances.reserve(size);
     }
+    if (hasElongations()) {
+      elongations.reserve(size);
+    }
     if (hasFrameIndex()) {
       frameidx.reserve(size);
     }
@@ -449,6 +506,7 @@ public:
     positions.clear();
     colors.clear();
     reflectances.clear();
+    elongations.clear();
     frameidx.clear();
     laserAngles.clear();
   }
@@ -492,6 +550,11 @@ public:
       std::copy(
         src.reflectances.begin(), src.reflectances.end(),
         std::next(reflectances.begin(), dstEnd));
+    
+    if (hasElongations() && src.hasElongations())
+      std::copy(
+        src.elongations.begin(), src.elongations.end(),
+        std::next(elongations.begin(), dstEnd));
 
     if (hasLaserAngles())
       std::copy(
@@ -509,6 +572,9 @@ public:
     }
     if (hasReflectances()) {
       std::swap(getReflectance(index1), getReflectance(index2));
+    }
+    if (hasElongations()) {
+      std::swap(getElongation(index1), getElongation(index2));
     }
     if (hasLaserAngles()) {
       std::swap(getLaserAngle(index1), getLaserAngle(index2));
@@ -567,9 +633,11 @@ private:
   std::vector<PointType> positions;
   std::vector<Vec3<attr_t>> colors;
   std::vector<attr_t> reflectances;
+  std::vector<attr_t> elongations;
   std::vector<uint8_t> frameidx;
   bool withColors;
   bool withReflectances;
+  bool withElongations;
   bool withFrameIndex;
   std::vector<int> laserAngles;
   bool withLaserAngles;

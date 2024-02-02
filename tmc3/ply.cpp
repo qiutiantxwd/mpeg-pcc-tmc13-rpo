@@ -134,6 +134,9 @@ ply::write(
   if (cloud.hasReflectances()) {
     fout << "property uint16 refc" << std::endl;
   }
+  if (cloud.hasElongations()) {
+    fout << "property uint16 elong" << std::endl;
+  }
   if (cloud.hasFrameIndex()) {
     fout << "property uint8 frameindex" << std::endl;
   }
@@ -154,6 +157,9 @@ ply::write(
       }
       if (cloud.hasReflectances()) {
         fout << " " << static_cast<int>(cloud.getReflectance(i));
+      }
+      if (cloud.hasElongations()) {
+        fout << " " << static_cast<int>(cloud.getElongation(i));
       }
       if (cloud.hasFrameIndex()) {
         fout << " " << static_cast<int>(cloud.getFrameIndex(i));
@@ -176,6 +182,10 @@ ply::write(
       if (cloud.hasReflectances()) {
         const attr_t& reflectance = cloud.getReflectance(i);
         fout.write(reinterpret_cast<const char*>(&reflectance), sizeof(uint16_t));
+      }
+      if (cloud.hasElongations()) {
+        const attr_t& elongation = cloud.getElongation(i);
+        fout.write(reinterpret_cast<const char*>(&elongation), sizeof(uint16_t));
       }
       if (cloud.hasFrameIndex()) {
         const uint16_t& findex = cloud.getFrameIndex(i);
@@ -443,6 +453,7 @@ ply::read(
   size_t indexG = PCC_UNDEFINED_INDEX;
   size_t indexB = PCC_UNDEFINED_INDEX;
   size_t indexReflectance = PCC_UNDEFINED_INDEX;
+  size_t indexElongation = PCC_UNDEFINED_INDEX;
   size_t indexFrame = PCC_UNDEFINED_INDEX;
   size_t indexNX = PCC_UNDEFINED_INDEX;
   size_t indexNY = PCC_UNDEFINED_INDEX;
@@ -474,6 +485,10 @@ ply::read(
       && attributeInfo.byteCount <= 2) {
       indexReflectance = a;
     } else if (
+      (attributeInfo.name == "elongation" || attributeInfo.name == "elong")
+      && attributeInfo.byteCount <= 2) {
+      indexElongation = a;
+    } else if (
       attributeInfo.name == "frameindex" && attributeInfo.byteCount <= 2) {
       indexFrame = a;
     } else if (
@@ -501,10 +516,12 @@ ply::read(
   bool withColors = indexR != PCC_UNDEFINED_INDEX
     && indexG != PCC_UNDEFINED_INDEX && indexB != PCC_UNDEFINED_INDEX;
   bool withReflectances = indexReflectance != PCC_UNDEFINED_INDEX;
+  bool withElongations = indexElongation != PCC_UNDEFINED_INDEX;
   bool withFrameIndex = indexFrame != PCC_UNDEFINED_INDEX;
   bool withLaserAngles = indexLaserAngle != PCC_UNDEFINED_INDEX;
 
-  cloud.addRemoveAttributes(withColors, withReflectances);
+  // cloud.addRemoveAttributes(withColors, withReflectances);
+  cloud.addRemoveAttributes(withColors, withReflectances, withElongations);
   if (withFrameIndex)
     cloud.addFrameIndex();
   else
@@ -539,6 +556,10 @@ ply::read(
       }
       if (cloud.hasReflectances()) {
         cloud.getReflectance(pointCounter) =
+          uint16_t(atoi(tokens[indexReflectance].c_str()));
+      }
+      if (cloud.hasElongations()) {
+        cloud.getElongation(pointCounter) = 
           uint16_t(atoi(tokens[indexReflectance].c_str()));
       }
       if (cloud.hasFrameIndex()) {
@@ -607,6 +628,15 @@ ply::read(
           } else {
             auto& reflectance = cloud.getReflectance(pointCounter);
             ifs.read(reinterpret_cast<char*>(&reflectance), sizeof(uint16_t));
+          }
+        } else if (a == indexElongation && attributeInfo.byteCount <= 2) {
+          if (attributeInfo.byteCount == 1) {
+            uint8_t elongation;
+            ifs.read(reinterpret_cast<char*>(&elongation), sizeof(uint8_t));
+            cloud.getReflectance(pointCounter) = elongation;
+          } else {
+            auto& elongation = cloud.getReflectance(pointCounter);
+            ifs.read(reinterpret_cast<char*>(&elongation), sizeof(uint16_t));
           }
         } else if (a == indexFrame && attributeInfo.byteCount <= 2) {
           if (attributeInfo.byteCount == 1) {
