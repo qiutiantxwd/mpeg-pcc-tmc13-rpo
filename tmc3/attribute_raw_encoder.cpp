@@ -59,9 +59,13 @@ AttrRawEncoder::encode(
   int valueBits = desc.bitdepth;
 
   // todo(df): update to correctly map attribute types
-  if (desc.attr_num_dimensions_minus1 == 0) {
+  if (desc.attr_num_dimensions_minus1 == 0 && desc.attributeLabel.known_attribute_label == pcc::KnownAttributeLabel::kReflectance) {
     for (size_t i = 0; i < cloud.getPointCount(); i++) {
       bs.writeUn(valueBits, cloud.getReflectance(i));
+    }
+  } else if (desc.attr_num_dimensions_minus1 == 0 && desc.attributeLabel.known_attribute_label == pcc::KnownAttributeLabel::kElongation) {
+    for (size_t i = 0; i < cloud.getPointCount(); i++) {
+      bs.writeUn(valueBits, cloud.getElongation(i));
     }
   } else if (desc.attr_num_dimensions_minus1 == 2) {
     for (size_t i = 0; i < cloud.getPointCount(); i++) {
