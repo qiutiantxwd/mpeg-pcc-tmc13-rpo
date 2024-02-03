@@ -489,7 +489,7 @@ AttributeEncoder::encode(
   PCCResidualsEncoder encoder(attr_aps, abh, ctxtMem);
   encoder.start(sps, int(pointCloud.getPointCount()));
 
-  if (desc.attr_num_dimensions_minus1 == 0) {
+  if (desc.attr_num_dimensions_minus1 == 0 && desc.attributeLabel.known_attribute_label == pcc::KnownAttributeLabel::kReflectance) {
     switch (attr_aps.attr_encoding) {
     case AttributeEncoding::kRAHTransform:
       encodeReflectancesTransformRaht(
@@ -502,6 +502,17 @@ AttributeEncoder::encode(
 
     case AttributeEncoding::kLiftingTransform:
       encodeReflectancesLift(desc, attr_aps, qpSet, pointCloud, encoder);
+      break;
+
+    case AttributeEncoding::kRaw:
+      // Already handled
+      break;
+    }
+  } else if (desc.attr_num_dimensions_minus1 == 0 && desc.attributeLabel.known_attribute_label == pcc::KnownAttributeLabel::kElongation) {
+    switch (attr_aps.attr_encoding) {
+    case AttributeEncoding::kRAHTransform:
+      encodeElongationsTransformRaht(
+        desc, attr_aps, qpSet, pointCloud, encoder);
       break;
 
     case AttributeEncoding::kRaw:
@@ -1151,6 +1162,72 @@ AttributeEncoder::encodeReflectancesTransformRaht(
     const attr_t reflectance =
       attr_t(PCCClip(val, minReflectance, maxReflectance));
     pointCloud.setReflectance(packedVoxel[n].index, reflectance);
+  }
+}
+
+
+void
+AttributeEncoder::encodeElongationsTransformRaht(
+  const AttributeDescription& desc,
+  const AttributeParameterSet& aps,
+  const QpSet& qpSet,
+  PCCPointSet3& pointCloud,
+  PCCResidualsEncoder& encoder)
+{
+  const int voxelCount = int(pointCloud.getPointCount());
+  std::vector<MortonCodeWithIndex> packedVoxel(voxelCount);
+  for (int n = 0; n < voxelCount; n++) {
+    packedVoxel[n].mortonCode = mortonAddr(pointCloud[n]);
+    packedVoxel[n].index = n;
+  }
+  sort(packedVoxel.begin(), packedVoxel.end());
+
+  // Allocate arrays.
+  const int attribCount = 1;
+  std::vector<int64_t> mortonCode(voxelCount);
+  std::vector<int> attributes(attribCount * voxelCount);
+  std::vector<int> coefficients(attribCount * voxelCount);
+  std::vector<Qps> pointQpOffsets(voxelCount);
+
+  // Populate input arrays.
+  for (int n = 0; n < voxelCount; n++) {
+    mortonCode[n] = packedVoxel[n].mortonCode;
+    const auto elongation = pointCloud.getElongation(packedVoxel[n].index);
+    attributes[attribCount * n] = elongation;
+    pointQpOffsets[n] = qpSet.regionQpOffset(pointCloud[packedVoxel[n].index]);
+  }
+
+  const int rahtPredThreshold[2] = {aps.raht_prediction_threshold0,
+                                    aps.raht_prediction_threshold1};
+
+  // Transform.
+  regionAdaptiveHierarchicalTransform(
+    aps.raht_prediction_enabled_flag, rahtPredThreshold, qpSet,
+    pointQpOffsets.data(), mortonCode.data(), attributes.data(), attribCount,
+    voxelCount, coefficients.data());
+
+  // Entropy encode.
+  int zeroRun = 0;
+  for (int n = 0; n < voxelCount; ++n) {
+    auto value = coefficients[n];
+    if (!value)
+      ++zeroRun;
+    else {
+      encoder.encodeRunLength(zeroRun);
+      encoder.encode(value);
+      zeroRun = 0;
+    }
+  }
+  if (zeroRun)
+    encoder.encodeRunLength(zeroRun);
+
+  const int64_t maxElongation = (1 << desc.bitdepth) - 1;
+  const int64_t minElongation = 0;
+  for (int n = 0; n < voxelCount; n++) {
+    int64_t val = attributes[attribCount * n];
+    const attr_t elongation =
+      attr_t(PCCClip(val, minElongation, maxElongation));
+    pointCloud.setElongation(packedVoxel[n].index, elongation);
   }
 }
 

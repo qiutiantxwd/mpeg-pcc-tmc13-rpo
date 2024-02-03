@@ -108,6 +108,13 @@ protected:
     PCCPointSet3& pointCloud,
     PCCResidualsEncoder& encoder);
 
+  void encodeElongationsTransformRaht(
+    const AttributeDescription& desc,
+    const AttributeParameterSet& aps,
+    const QpSet& qpSet,
+    PCCPointSet3& pointCloud,
+    PCCResidualsEncoder& encoder);
+
   void encodeColorsTransformRaht(
     const AttributeDescription& desc,
     const AttributeParameterSet& aps,
