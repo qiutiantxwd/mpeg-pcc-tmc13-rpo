@@ -217,7 +217,7 @@ AttributeDecoder::decode(
     _lods.generate(
       attr_aps, abh, geom_num_points_minus1, minGeomNodeSizeLog2, pointCloud);
 
-  if (attr_desc.attr_num_dimensions_minus1 == 0) {
+  if (attr_desc.attr_num_dimensions_minus1 == 0 && attr_desc.attributeLabel.known_attribute_label == pcc::KnownAttributeLabel::kReflectance) {
     switch (attr_aps.attr_encoding) {
     case AttributeEncoding::kRAHTransform:
       decodeReflectancesRaht(attr_desc, attr_aps, qpSet, decoder, pointCloud);
@@ -232,6 +232,16 @@ AttributeDecoder::decode(
       decodeReflectancesLift(
         attr_desc, attr_aps, abh, qpSet, geom_num_points_minus1,
         minGeomNodeSizeLog2, decoder, pointCloud);
+      break;
+
+    case AttributeEncoding::kRaw:
+      // Already handled
+      break;
+    }
+  } else if (attr_desc.attr_num_dimensions_minus1 == 0 && attr_desc.attributeLabel.known_attribute_label == pcc::KnownAttributeLabel::kElongation) {
+    switch (attr_aps.attr_encoding) {
+    case AttributeEncoding::kRAHTransform:
+      decodeElongationsRaht(attr_desc, attr_aps, qpSet, decoder, pointCloud);
       break;
 
     case AttributeEncoding::kRaw:
@@ -559,6 +569,65 @@ AttributeDecoder::decodeReflectancesRaht(
     const attr_t reflectance =
       attr_t(PCCClip(val, minReflectance, maxReflectance));
     pointCloud.setReflectance(packedVoxel[n].index, reflectance);
+  }
+}
+
+
+void
+AttributeDecoder::decodeElongationsRaht(
+  const AttributeDescription& desc,
+  const AttributeParameterSet& aps,
+  const QpSet& qpSet,
+  PCCResidualsDecoder& decoder,
+  PCCPointSet3& pointCloud)
+{
+  const int voxelCount = int(pointCloud.getPointCount());
+  std::vector<MortonCodeWithIndex> packedVoxel(voxelCount);
+  for (int n = 0; n < voxelCount; n++) {
+    packedVoxel[n].mortonCode = mortonAddr(pointCloud[n]);
+    packedVoxel[n].index = n;
+  }
+  sort(packedVoxel.begin(), packedVoxel.end());
+
+  // Morton codes
+  std::vector<int64_t> mortonCode(voxelCount);
+  for (int n = 0; n < voxelCount; n++) {
+    mortonCode[n] = packedVoxel[n].mortonCode;
+  }
+
+  // Entropy decode
+  const int attribCount = 1;
+  std::vector<int> coefficients(attribCount * voxelCount);
+  std::vector<Qps> pointQpOffsets(voxelCount);
+  int zeroRunRem = 0;
+  for (int n = 0; n < voxelCount; ++n) {
+    if (--zeroRunRem < 0)
+      zeroRunRem = decoder.decodeRunLength();
+
+    uint32_t value = 0;
+    if (!zeroRunRem)
+      value = decoder.decode();
+
+    coefficients[n] = value;
+    pointQpOffsets[n] = qpSet.regionQpOffset(pointCloud[packedVoxel[n].index]);
+  }
+
+  std::vector<int> attributes(attribCount * voxelCount);
+  const int rahtPredThreshold[2] = {aps.raht_prediction_threshold0,
+                                    aps.raht_prediction_threshold1};
+
+  regionAdaptiveHierarchicalInverseTransform(
+    aps.raht_prediction_enabled_flag, rahtPredThreshold, qpSet,
+    pointQpOffsets.data(), mortonCode.data(), attributes.data(), attribCount,
+    voxelCount, coefficients.data());
+
+  const int64_t maxReflectance = (1 << desc.bitdepth) - 1;
+  const int64_t minReflectance = 0;
+  for (int n = 0; n < voxelCount; n++) {
+    int64_t val = attributes[attribCount * n];
+    const attr_t elongation =
+      attr_t(PCCClip(val, minReflectance, maxReflectance));
+    pointCloud.setElongation(packedVoxel[n].index, elongation);
   }
 }
 
