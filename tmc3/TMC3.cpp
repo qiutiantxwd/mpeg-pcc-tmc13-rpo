@@ -1464,6 +1464,16 @@ sanitizeEncoderOpts(
       attr_sps.attributeLabel = KnownAttributeLabel::kReflectance;
     }
 
+    if (it.first == "elongation") {
+      attr_aps.aps_chroma_qp_offset = 0;
+      attr_enc.abh.attr_layer_qp_delta_chroma.clear();
+
+      // There is no matrix for elongation
+      attrMeta.cicp_matrix_coefficients_idx = ColourMatrix::kUnspecified;
+      attr_sps.attr_num_dimensions_minus1 = 0;
+      attr_sps.attributeLabel = KnownAttributeLabel::kElongation;
+    }
+
     if (it.first == "color") {
       attr_sps.attr_num_dimensions_minus1 = 2;
       attr_sps.attributeLabel = KnownAttributeLabel::kColour;
@@ -1807,6 +1817,13 @@ SequenceEncoder::compressOneFrame(Stopwatch* clock)
       pointCloud.removeReflectances();
     assert(codeReflectance == pointCloud.hasReflectances());
 
+    bool codeElongation = params->encoder.attributeIdxMap.count("elongation");
+    if (!codeElongation)
+      pointCloud.removeElongations();
+    assert(codeElongation == pointCloud.hasElongations());
+
+    cout << std::endl << "Has Elongation?" << pointCloud.hasElongations() << std::endl;
+
     clock->start();
 
     if (params->convertColourspace)
@@ -2127,7 +2144,7 @@ findReflAttrDesc(const std::vector<AttributeDescription>& attrDescs)
 {
   // todo(df): don't assume that there is only one in the sps
   for (const auto& desc : attrDescs) {
-    if (desc.attributeLabel == KnownAttributeLabel::kReflectance)
+    if (desc.attributeLabel == KnownAttributeLabel::kReflectance || desc.attributeLabel == KnownAttributeLabel::kElongation)
       return &desc;
   }
   return nullptr;
