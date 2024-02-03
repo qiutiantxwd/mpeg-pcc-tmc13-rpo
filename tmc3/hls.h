@@ -69,6 +69,7 @@ enum class KnownAttributeLabel : uint32_t
   kFrameNumber = 4,
   kMaterialId = 5,
   kNormal = 6,
+  kElongation = 7,
 
   // Indicates that the attrabute label is described by an Oid
   kOid = 0xffffffff,
