@@ -1974,7 +1974,7 @@ encodeGeometryOctree(
   // otherwise would.
   PCCPointSet3 pointCloud2;
   pointCloud2.addRemoveAttributes(
-    pointCloud.hasColors(), pointCloud.hasReflectances());
+    pointCloud.hasColors(), pointCloud.hasReflectances(), pointCloud.hasElongations());
   pointCloud2.resize(pointCloud.getPointCount());
 
   // copy points with DM points first, the rest second
@@ -1992,6 +1992,8 @@ encodeGeometryOctree(
       pointCloud2.setColor(dstIdx, pointCloud.getColor(i));
     if (pointCloud.hasReflectances())
       pointCloud2.setReflectance(dstIdx, pointCloud.getReflectance(i));
+    if (pointCloud.hasElongations())
+      pointCloud2.setElongation(dstIdx, pointCloud.getElongation(i));
   }
   pointCloud2.resize(outIdx);
   swap(pointCloud, pointCloud2);
