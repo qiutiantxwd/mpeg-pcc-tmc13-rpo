@@ -493,8 +493,14 @@ PCCTMC3Decoder3::decodeGeometryBrick(const PayloadBuffer& buf)
       return desc.attributeLabel == KnownAttributeLabel::kReflectance;
     });
 
+  bool hasElongation = std::any_of(
+    _sps->attributeSets.begin(), _sps->attributeSets.end(),
+    [](const AttributeDescription& desc) {
+      return desc.attributeLabel == KnownAttributeLabel::kElongation;
+    });
+
   _currentPointCloud.clear();
-  _currentPointCloud.addRemoveAttributes(hasColour, hasReflectance);
+  _currentPointCloud.addRemoveAttributes(hasColour, hasReflectance, hasElongation);
 
   pcc::chrono::Stopwatch<pcc::chrono::utime_inc_children_clock> clock_user;
   clock_user.start();
@@ -546,6 +552,19 @@ PCCTMC3Decoder3::decodeGeometryBrick(const PayloadBuffer& buf)
       defAttrVal = it->params.attr_default_value[0];
     for (int i = 0; i < _currentPointCloud.getPointCount(); i++)
       _currentPointCloud.setReflectance(i, defAttrVal);
+  }
+
+  if (hasElongation) {
+    auto it = std::find_if(
+      _outCloud.attrDesc.cbegin(), _outCloud.attrDesc.cend(),
+      [](const AttributeDescription& desc) {
+        return desc.attributeLabel == KnownAttributeLabel::kElongation;
+      });
+    attr_t defAttrVal = 1 << (it->bitdepth - 1);
+    if (!it->params.attr_default_value.empty())
+      defAttrVal = it->params.attr_default_value[0];
+    for (int i = 0; i < _currentPointCloud.getPointCount(); i++)
+      _currentPointCloud.setElongation(i, defAttrVal);
   }
 
   // Calculate a tree level at which to stop
@@ -730,6 +749,12 @@ PCCTMC3Decoder3::decodeConstantAttribute(const PayloadBuffer& buf)
     attr_t defAttrVal = attrDesc.params.attr_default_value[0];
     for (int i = 0; i < _currentPointCloud.getPointCount(); i++)
       _currentPointCloud.setReflectance(i, defAttrVal);
+  }
+
+  if (label == KnownAttributeLabel::kElongation) {
+    attr_t defAttrVal = attrDesc.params.attr_default_value[0];
+    for (int i = 0; i < _currentPointCloud.getPointCount(); i++)
+      _currentPointCloud.setElongation(i, defAttrVal);
   }
 }
 
