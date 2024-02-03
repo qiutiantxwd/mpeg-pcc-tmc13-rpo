@@ -1007,6 +1007,9 @@ getPartition(const PCCPointSet3& src, const std::vector<int32_t>& indexes)
     if (src.hasReflectances())
       dst.setReflectance(i, src.getReflectance(inputIdx));
 
+    if (src.hasElongations())
+      dst.setElongation(i, src.getReflectance(inputIdx));
+
     if (src.hasLaserAngles())
       dst.setLaserAngle(i, src.getLaserAngle(inputIdx));
   }
@@ -1054,6 +1057,9 @@ getPartition(
 
       if (src.hasReflectances())
         dst.setReflectance(dstIdx, src.getReflectance(srcIdx));
+
+      if (src.hasElongations())
+        dst.setElongation(dstIdx, src.getElongation(srcIdx));
 
       if (src.hasLaserAngles())
         dst.setLaserAngle(dstIdx, src.getLaserAngle(srcIdx));
