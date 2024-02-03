@@ -192,6 +192,14 @@ bool recolourReflectance(
   point_t targetToSourceOffset,
   PCCPointSet3& target);
 
+bool recolourElongation(
+  const AttributeDescription& desc,
+  const RecolourParams& cfg,
+  const PCCPointSet3& source,
+  double sourceToTargetScaleFactor,
+  point_t targetToSourceOffset,
+  PCCPointSet3& target);
+
 //============================================================================
 // Recolour attributes based on a source/reference point cloud.
 //

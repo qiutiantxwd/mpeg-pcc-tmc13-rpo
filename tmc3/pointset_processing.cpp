@@ -124,7 +124,7 @@ reducePointSet(const PCCPointSet3& src, UniqueFn uniqueFn, QFn qFn)
   }
 
   // Add attribute storage to match src
-  dst.cloud.addRemoveAttributes(src.hasColors(), src.hasReflectances());
+  dst.cloud.addRemoveAttributes(src.hasColors(), src.hasReflectances(), src.hasElongations());
 
   return dst;
 }
@@ -201,7 +201,7 @@ reducePointSetCustom(const PCCPointSet3& src, UniqueFn uniqueFn, QFn qFn)
   }
 
   // Add attribute storage to match src
-  dst.cloud.addRemoveAttributes(src.hasColors(), src.hasReflectances());
+  dst.cloud.addRemoveAttributes(src.hasColors(), src.hasReflectances(), src.hasElongations());
 
   return dst;
 }
@@ -330,6 +330,11 @@ quantizePositions(
   if (src.hasReflectances()) {
     for (int i = 0; i < numSrcPoints; ++i)
       dst->setReflectance(i, src.getReflectance(i));
+  }
+
+  if (src.hasElongations()) {
+    for (int i = 0; i < numSrcPoints; ++i)
+      dst->setElongation(i, src.getElongation(i));
   }
 
   if (src.hasLaserAngles()) {
@@ -1040,6 +1045,308 @@ recolourReflectance(
   return true;
 }
 
+
+bool
+recolourElongation(
+  const AttributeDescription& attrDesc,
+  const RecolourParams& cfg,
+  const PCCPointSet3& source,
+  double sourceToTargetScaleFactor,
+  point_t targetToSourceOffset,
+  PCCPointSet3& target)
+{
+  double targetToSourceScaleFactor = 1.0 / sourceToTargetScaleFactor;
+
+  const size_t pointCountSource = source.getPointCount();
+  const size_t pointCountTarget = target.getPointCount();
+  if (!pointCountSource || !pointCountTarget || !source.hasElongations()) {
+    return false;
+  }
+  KDTreeVectorOfVectorsAdaptor<PCCPointSet3, double> kdtreeTarget(
+    3, target, 10);
+  KDTreeVectorOfVectorsAdaptor<PCCPointSet3, double> kdtreeSource(
+    3, source, 10);
+  target.addElongations();
+  std::vector<attr_t> refinedElongations1;
+  refinedElongations1.resize(pointCountTarget);
+
+  double clipMax = (1 << attrDesc.bitdepth) - 1;
+
+  double maxGeometryDist2Fwd = (cfg.maxGeometryDist2Fwd < 512)
+    ? cfg.maxGeometryDist2Fwd
+    : std::numeric_limits<double>::max();
+  double maxGeometryDist2Bwd = (cfg.maxGeometryDist2Bwd < 512)
+    ? cfg.maxGeometryDist2Bwd
+    : std::numeric_limits<double>::max();
+  double maxAttributeDist2Fwd = (cfg.maxAttributeDist2Fwd < 512)
+    ? cfg.maxAttributeDist2Fwd
+    : std::numeric_limits<double>::max();
+  double maxAttributeDist2Bwd = (cfg.maxAttributeDist2Bwd < 512)
+    ? cfg.maxAttributeDist2Bwd
+    : std::numeric_limits<double>::max();
+
+  // Forward direction
+  const int num_resultsFwd = cfg.numNeighboursFwd;
+  nanoflann::KNNResultSet<double> resultSetFwd(num_resultsFwd);
+  std::vector<size_t> indicesFwd(num_resultsFwd);
+  std::vector<double> sqrDistFwd(num_resultsFwd);
+  for (size_t index = 0; index < pointCountTarget; ++index) {
+    resultSetFwd.init(&indicesFwd[0], &sqrDistFwd[0]);
+
+    Vec3<double> posInSrc =
+      (target[index] + targetToSourceOffset) * targetToSourceScaleFactor;
+
+    kdtreeSource.index->findNeighbors(
+      resultSetFwd, &posInSrc[0], nanoflann::SearchParams(10));
+
+    while (1) {
+      if (indicesFwd.size() == 1)
+        break;
+
+      if (sqrDistFwd[int(resultSetFwd.size()) - 1] <= maxGeometryDist2Fwd)
+        break;
+
+      sqrDistFwd.pop_back();
+      indicesFwd.pop_back();
+    }
+
+    bool isDone = false;
+    if (cfg.skipAvgIfIdenticalSourcePointPresentFwd) {
+      if (sqrDistFwd[0] < 0.0001) {
+        refinedElongations1[index] = source.getElongation(indicesFwd[0]);
+        isDone = true;
+      }
+    }
+
+    if (isDone)
+      continue;
+
+    int nNN = indicesFwd.size();
+    while (nNN > 0 && !isDone) {
+      if (nNN == 1) {
+        refinedElongations1[index] = source.getElongation(indicesFwd[0]);
+        isDone = true;
+        continue;
+      }
+
+      std::vector<attr_t> elongations;
+      elongations.resize(0);
+      elongations.resize(nNN);
+      for (int i = 0; i < nNN; ++i) {
+        elongations[i] = double(source.getElongation(indicesFwd[i]));
+      }
+      double maxAttributeDist2 = std::numeric_limits<double>::min();
+      for (int i = 0; i < nNN; ++i) {
+        for (int j = 0; j < nNN; ++j) {
+          const double dist2 = pow(elongations[i] - elongations[j], 2);
+          if (dist2 > maxAttributeDist2)
+            maxAttributeDist2 = dist2;
+        }
+      }
+      if (maxAttributeDist2 > maxAttributeDist2Fwd) {
+        --nNN;
+      } else {
+        double refinedElongation = 0.0;
+        if (cfg.useDistWeightedAvgFwd) {
+          double sumWeights{0.0};
+          for (int i = 0; i < nNN; ++i) {
+            const double weight = 1 / (sqrDistFwd[i] + cfg.distOffsetFwd);
+            refinedElongation +=
+              source.getElongation(indicesFwd[i]) * weight;
+            sumWeights += weight;
+          }
+          refinedElongation /= sumWeights;
+        } else {
+          for (int i = 0; i < nNN; ++i)
+            refinedElongation += source.getElongation(indicesFwd[i]);
+          refinedElongation /= nNN;
+        }
+        refinedElongations1[index] =
+          attr_t(PCCClip(round(refinedElongation), 0.0, clipMax));
+        isDone = true;
+      }
+    }
+  }
+
+  // Backward direction
+  const size_t num_resultsBwd = cfg.numNeighboursBwd;
+  std::vector<size_t> indicesBwd(num_resultsBwd);
+  std::vector<double> sqrDistBwd(num_resultsBwd);
+  nanoflann::KNNResultSet<double> resultSetBwd(num_resultsBwd);
+
+  struct DistElongation {
+    double dist;
+    attr_t elongation;
+  };
+  std::vector<std::vector<DistElongation>> refinedElongationsDists2;
+  refinedElongationsDists2.resize(pointCountTarget);
+
+  for (size_t index = 0; index < pointCountSource; ++index) {
+    const attr_t elongation = source.getElongation(index);
+    resultSetBwd.init(&indicesBwd[0], &sqrDistBwd[0]);
+
+    Vec3<double> posInTgt =
+      source[index] * sourceToTargetScaleFactor - targetToSourceOffset;
+
+    kdtreeTarget.index->findNeighbors(
+      resultSetBwd, &posInTgt[0], nanoflann::SearchParams(10));
+
+    for (int i = 0; i < num_resultsBwd; ++i) {
+      if (sqrDistBwd[i] <= maxGeometryDist2Bwd) {
+        refinedElongationsDists2[indicesBwd[i]].push_back(
+          DistElongation{sqrDistBwd[i], elongation});
+      }
+    }
+  }
+
+  for (size_t index = 0; index < pointCountTarget; ++index) {
+    std::sort(
+      refinedElongationsDists2[index].begin(),
+      refinedElongationsDists2[index].end(),
+      [](const DistElongation& dc1, const DistElongation& dc2) {
+        return dc1.dist < dc2.dist;
+      });
+  }
+
+  for (size_t index = 0; index < pointCountTarget; ++index) {
+    const attr_t elongation1 = refinedElongations1[index];
+    auto& elongationsDists2 = refinedElongationsDists2[index];
+    if (elongationsDists2.empty()) {
+      target.setElongation(index, elongation1);
+      continue;
+    }
+
+    bool isDone = false;
+    const double centroid1 = elongation1;
+    double centroid2 = 0.0;
+    if (cfg.skipAvgIfIdenticalSourcePointPresentBwd) {
+      if (elongationsDists2[0].dist < 0.0001) {
+        auto temp = elongationsDists2[0];
+        elongationsDists2.clear();
+        elongationsDists2.push_back(temp);
+        centroid2 = elongationsDists2[0].elongation;
+        isDone = true;
+      }
+    }
+    if (!isDone) {
+      int nNN = elongationsDists2.size();
+      while (nNN > 0 && !isDone) {
+        nNN = elongationsDists2.size();
+        if (nNN == 1) {
+          auto temp = elongationsDists2[0];
+          elongationsDists2.clear();
+          elongationsDists2.push_back(temp);
+          centroid2 = elongationsDists2[0].elongation;
+          isDone = true;
+        }
+        if (!isDone) {
+          std::vector<double> elongations;
+          elongations.resize(0);
+          elongations.resize(nNN);
+          for (int i = 0; i < nNN; ++i) {
+            elongations[i] = double(elongationsDists2[i].elongation);
+          }
+          double maxAttributeDist2 = std::numeric_limits<double>::min();
+          for (int i = 0; i < nNN; ++i) {
+            for (int j = 0; j < nNN; ++j) {
+              const double dist2 = pow(elongations[i] - elongations[j], 2);
+              if (dist2 > maxAttributeDist2) {
+                maxAttributeDist2 = dist2;
+              }
+            }
+          }
+          if (maxAttributeDist2 <= maxAttributeDist2Bwd) {
+            centroid2 = 0;
+            if (cfg.useDistWeightedAvgBwd) {
+              double sumWeights{0.0};
+              for (int i = 0; i < elongationsDists2.size(); ++i) {
+                const double weight =
+                  1 / (sqrt(elongationsDists2[i].dist) + cfg.distOffsetBwd);
+                centroid2 += (elongationsDists2[i].elongation * weight);
+                sumWeights += weight;
+              }
+              centroid2 /= sumWeights;
+            } else {
+              for (auto& refdist : elongationsDists2) {
+                centroid2 += refdist.elongation;
+              }
+              centroid2 /= elongationsDists2.size();
+            }
+            isDone = true;
+          } else {
+            elongationsDists2.pop_back();
+          }
+        }
+      }
+    }
+    double H = double(elongationsDists2.size());
+    double D2 = 0.0;
+    for (const auto elongation2dist : elongationsDists2) {
+      auto elongation2 = elongation2dist.elongation;
+      const double d2 = centroid2 - elongation2;
+      D2 += d2 * d2;
+    }
+    const double r = double(pointCountTarget) / double(pointCountSource);
+    const double delta2 = pow(centroid2 - centroid1, 2);
+    const double eps = 0.000001;
+
+    const bool fixWeight = 1;  // m42538
+    if (!(fixWeight || delta2 > eps)) {
+      // centroid2 == centroid1
+      target.setElongation(index, elongation1);
+    } else {
+      // centroid2 != centroid1
+      double w = 0.0;
+
+      if (!fixWeight) {
+        const double alpha = D2 / delta2;
+        const double a = H * r - 1.0;
+        const double c = alpha * r - 1.0;
+        if (fabs(a) < eps) {
+          w = -0.5 * c;
+        } else {
+          const double delta = 1.0 - a * c;
+          if (delta >= 0.0) {
+            w = (-1.0 + sqrt(delta)) / a;
+          }
+        }
+      }
+      const double oneMinusW = 1.0 - w;
+      double elongation0;
+      elongation0 =
+        PCCClip(round(w * centroid1 + oneMinusW * centroid2), 0.0, clipMax);
+      const double rSource = 1.0 / double(pointCountSource);
+      const double rTarget = 1.0 / double(pointCountTarget);
+      double minError = std::numeric_limits<double>::max();
+      double bestElongation = elongation0;
+      double elongation;
+      for (int32_t s1 = -cfg.searchRange; s1 <= cfg.searchRange; ++s1) {
+        elongation = PCCClip(elongation0 + s1, 0.0, clipMax);
+        double e1 = 0.0;
+        const double d = elongation - elongation1;
+        e1 += d * d;
+        e1 *= rTarget;
+
+        double e2 = 0.0;
+        for (const auto elongation2dist : elongationsDists2) {
+          auto elongation2 = elongation2dist.elongation;
+          const double d = elongation - elongation2;
+          e2 += d * d;
+        }
+        e2 *= rSource;
+
+        const double error = std::max(e1, e2);
+        if (error < minError) {
+          minError = error;
+          bestElongation = elongation;
+        }
+      }
+      target.setElongation(index, attr_t(bestElongation));
+    }
+  }
+  return true;
+}
+
 //============================================================================
 // Colour attributes of a target point cloud given a source.
 //
@@ -1072,6 +1379,16 @@ recolour(
     bool ok = recolourReflectance(
       desc, cfg, source, sourceToTargetScaleFactor, tgtToSrcOffset, *target);
 
+    if (!ok) {
+      std::cout << "Error: can't transfer reflectance!" << std::endl;
+      return -1;
+    }
+  }
+
+  if (desc.attributeLabel == KnownAttributeLabel::kElongation) {
+    bool ok = recolourElongation(
+      desc, cfg, source, sourceToTargetScaleFactor, tgtToSrcOffset, *target);
+    
     if (!ok) {
       std::cout << "Error: can't transfer reflectance!" << std::endl;
       return -1;
