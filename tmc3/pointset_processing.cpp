@@ -1390,7 +1390,7 @@ recolour(
       desc, cfg, source, sourceToTargetScaleFactor, tgtToSrcOffset, *target);
     
     if (!ok) {
-      std::cout << "Error: can't transfer reflectance!" << std::endl;
+      std::cout << "Error: can't transfer elongation!" << std::endl;
       return -1;
     }
   }
