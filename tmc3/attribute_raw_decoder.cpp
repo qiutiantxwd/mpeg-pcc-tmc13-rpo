@@ -57,7 +57,7 @@ AttrRawDecoder::decode(
   int valueBits = desc.bitdepth;
 
   // todo(df): update to correctly map attribute types
-  if (desc.attr_num_dimensions_minus1 == 0) {
+  if (desc.attr_num_dimensions_minus1 == 0 && desc.attributeLabel.known_attribute_label == pcc::KnownAttributeLabel::kReflectance) {
     for (size_t i = 0; i < cloud.getPointCount(); i++) {
       if (aps.raw_attr_variable_len_flag) {
         int raw_attr_component_length;
@@ -65,6 +65,15 @@ AttrRawDecoder::decode(
         valueBits = 8 * raw_attr_component_length;
       }
       bs.readUn(valueBits, &cloud.getReflectance(i));
+    }
+  } else if (desc.attr_num_dimensions_minus1 == 0 && desc.attributeLabel.known_attribute_label == pcc::KnownAttributeLabel::kElongation) {
+    for (size_t i = 0; i < cloud.getPointCount(); i++) {
+      if (aps.raw_attr_variable_len_flag) {
+        int raw_attr_component_length;
+        bs.readUn(8, &raw_attr_component_length);
+        valueBits = 8 * raw_attr_component_length;
+      }
+      bs.readUn(valueBits, &cloud.getElongation(i));
     }
   } else if (desc.attr_num_dimensions_minus1 == 2) {
     for (size_t i = 0; i < cloud.getPointCount(); i++) {
