@@ -560,7 +560,7 @@ ply::read(
       }
       if (cloud.hasElongations()) {
         cloud.getElongation(pointCounter) = 
-          uint16_t(atoi(tokens[indexReflectance].c_str()));
+          uint16_t(atoi(tokens[indexElongation].c_str()));
       }
       if (cloud.hasFrameIndex()) {
         cloud.getFrameIndex(pointCounter) =
@@ -633,9 +633,9 @@ ply::read(
           if (attributeInfo.byteCount == 1) {
             uint8_t elongation;
             ifs.read(reinterpret_cast<char*>(&elongation), sizeof(uint8_t));
-            cloud.getReflectance(pointCounter) = elongation;
+            cloud.getElongation(pointCounter) = elongation;
           } else {
-            auto& elongation = cloud.getReflectance(pointCounter);
+            auto& elongation = cloud.getElongation(pointCounter);
             ifs.read(reinterpret_cast<char*>(&elongation), sizeof(uint16_t));
           }
         } else if (a == indexFrame && attributeInfo.byteCount <= 2) {
